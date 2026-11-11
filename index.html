@@ -1922,7 +1922,10 @@ function scoreOv(){
 }
 /* ---------- menu ---------- */
 function heroPicker(){return `<div class="heroes mini">${HEROES.map(x=>`<button class="hero ${S.hero===x.id?'on':''}" data-a="hero" data-v="${x.id}">${portrait(x.id)}<b>${x.name}</b><small>${x.power}</small></button>`).join('')}</div><p class="hdesc"><b>${hero(S.hero).power}.</b> ${hero(S.hero).desc}</p>`;}
+const PUB_SITE='https://germansini-lab.github.io/durak-knights/';
 function friendsPanel(){
+ if(typeof makeSupaRooms==='undefined')return `<div class="panel"><h3>משחק עם חברים</h3><p class="hdesc">משחק עם חברים מתנהל באתר הציבורי של המשחק – כל מי שמקבל את הקישור נכנס בלי הרשמה.</p>
+  <a class="btn wa big" href="${PUB_SITE}" target="_blank" rel="noopener">פתח את המשחק עם חברים</a><div class="linkshow" dir="ltr">${PUB_SITE}</div></div>`;
  const bad=UI.needName&&!String(S.nick||'').trim();
  const nick=`<input class="inp ${bad?'err':''}" id="nick" maxlength="14" placeholder="רשום את השם שלך" value="${esc(S.nick||'')}">${bad?'<p class="hdesc" style="color:#ff8a92;margin-top:6px">רשום שם כדי שהחברים יזהו אותך</p>':''}`;
  if(ROOM_STATE==='wait')return `<div class="panel"><h3>משחק עם חברים</h3><p class="hdesc pulse">מתחבר…</p></div>`;
