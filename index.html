@@ -319,6 +319,25 @@ button{font-family:inherit;cursor:pointer}
 .bubble::after{content:"";position:absolute;top:100%;left:50%;margin-left:-6px;border:6px solid transparent;border-top-color:#fffdf6}
 .bubble .be{font-size:28px;line-height:1}
 .seat.mine .bubble{bottom:auto;top:-38px}
+.invite-ov .sheet{max-width:360px}
+.inv-host{display:flex;gap:12px;align-items:center;background:#08100b;border:1px solid rgba(201,163,90,.35);border-radius:12px;padding:10px;margin:6px 0 4px}
+.inv-host .pt{width:52px;height:52px;flex:none}
+.inv-host b{color:var(--gold-l)}
+.inv-game{font-family:'Frank Ruhl Libre',serif;font-size:24px;color:var(--gold-l);font-weight:700;line-height:1.2}
+.inv-host small{color:var(--mut);font-size:12px}
+.inv-h{font-family:'Frank Ruhl Libre',serif;color:var(--gold-l);font-size:15px;margin:12px 0 6px}
+.herorow{display:flex;gap:6px;justify-content:center;direction:ltr}
+.herorow .hr{background:none;border:0;padding:2px;border-radius:50%;opacity:.55;transition:.15s}
+.herorow .hr .pt{width:40px;height:40px}
+.herorow .hr.on{opacity:1;box-shadow:0 0 0 2px var(--gold-l);transform:scale(1.08)}
+.waitclock{position:relative;width:96px;height:96px}
+.waitclock svg{width:100%;height:100%}
+.waitclock .wn{position:absolute;inset:0;display:grid;place-items:center;align-content:center;font-family:'Frank Ruhl Libre',serif;font-size:34px;font-weight:700;color:var(--gold-l);line-height:1}
+.waitclock .wn small{display:block;font-size:11px;color:#d8f0e0;font-family:Heebo;font-weight:500}
+.seat.empty .med{background:rgba(0,0,0,.25);box-shadow:0 0 0 1.5px rgba(201,163,90,.5) inset;border:1px dashed rgba(236,212,154,.6)}
+.seat.empty .q{color:rgba(236,212,154,.7);font-family:'Frank Ruhl Libre',serif;font-size:24px}
+.seat.empty .plate b{color:var(--mut);font-weight:500}
+.waiting .acts .btn{text-align:center;text-decoration:none}
 .btn.wa{background:linear-gradient(180deg,#2bb673,#16804c);color:#fff;border-color:#9be3bd;text-align:center;text-decoration:none;margin:10px 0 8px;font-family:Heebo,sans-serif;font-weight:700}
 .sheet .btn.wa{text-align:center}
 .linkshow{margin-top:8px;font-size:12px;color:var(--gold-l);background:#08100b;border:1px dashed rgba(201,163,90,.4);border-radius:8px;padding:8px;word-break:break-all;user-select:all;-webkit-user-select:all}
@@ -872,7 +891,10 @@ function addToBoard(res,gm){
  saveSB();
 }
 
-/* ===== Online transport for the public site: Supabase Realtime presence, same interface as the in-Claude room ===== */
+/* ===== Online transport for the public site: Supabase Realtime.
+   Same interface as the in-Claude room. Presence is used only to know who is at the table
+   (one call when joining); every state change travels as a broadcast message, which the
+   server allows at a much higher rate. Newcomers get everyone's latest state on arrival. ===== */
 const SB_URL='https://opczhjesvkywvnbojkrv.supabase.co';
 const SB_KEY='sb_publishable_fg2qHbh2t1QRNQr3x9N-vQ_qi48j9Eg';
 function makeSupaRooms(){
@@ -881,48 +903,72 @@ function makeSupaRooms(){
  let myPeer=null;try{myPeer=sessionStorage.getItem('dkPeer');}catch(e){}
  if(!myPeer){myPeer=Math.random().toString(36).slice(2,12);try{sessionStorage.setItem('dkPeer',myPeer);}catch(e){}}
  function makeRoom(name){
-  const ch=sb.channel('dk-'+name,{config:{presence:{key:myPeer},broadcast:{self:false}}});
-  let mine={},listeners=[],connListeners=[],last=new Map(),cache=new Map(),joined=false,lastSent=0,tmo=null,dead=false;
+  const ch=sb.channel('dk-'+name,{config:{presence:{key:myPeer},broadcast:{self:false,ack:false}}});
+  let mine={},state=new Map(),members=new Set(),listeners=[],connL=[],last=new Map(),cache=new Map(),joined=false,dead=false,lastSent=0,tmo=null;
   function snap(){
-   const st=ch.presenceState(),out=[];
-   for(const k in st){
+   const out=[];
+   for(const k of members){
     if(k===myPeer)continue;
-    const metas=st[k];const m=metas&&metas[metas.length-1];if(!m||typeof m.p!=='string')continue;
-    let c=cache.get(k);if(!c||c.s!==m.p){let pr={};try{pr=JSON.parse(m.p);}catch(e){}c={s:m.p,o:Object.freeze({peer:k,by:null,isMe:false,sameTab:false,kind:'viewer',guest:false,presence:pr,updatedAt:Date.now()})};cache.set(k,c);}
+    const st=state.get(k)||{};
+    let c=cache.get(k);
+    if(!c||c.src!==st){c={src:st,o:Object.freeze({peer:k,by:null,isMe:false,sameTab:false,kind:'viewer',guest:false,presence:st,updatedAt:Date.now()})};cache.set(k,c);}
     out.push(c.o);
    }
-   let me=cache.get('#me');if(!me||me.src!==mine){me={src:mine,o:Object.freeze({peer:myPeer,by:null,isMe:true,sameTab:true,kind:'viewer',guest:false,presence:mine,updatedAt:Date.now()})};cache.set('#me',me);}
+   let me=cache.get('#me');
+   if(!me||me.src!==mine){me={src:mine,o:Object.freeze({peer:myPeer,by:null,isMe:true,sameTab:true,kind:'viewer',guest:false,presence:mine,updatedAt:Date.now()})};cache.set('#me',me);}
    out.push(me.o);
    return out;
   }
   function notify(){
    if(dead)return;
-   const cur=snap(),cm=new Map(cur.map(p=>[p.peer,p])),joinedL=[],left=[],updated=[];
-   for(const p of cur){const o=last.get(p.peer);if(!o)joinedL.push(p);else if(o!==p)updated.push(p);}
+   const cur=snap(),cm=new Map(cur.map(p=>[p.peer,p])),jn=[],left=[],up=[];
+   for(const p of cur){const o=last.get(p.peer);if(!o)jn.push(p);else if(o!==p)up.push(p);}
    for(const [k,p] of last)if(!cm.has(k))left.push(p);
-   last=cm;const chg={peers:cur,joined:joinedL,left,updated};
+   last=cm;const chg={peers:cur,joined:jn,left,updated:up};
    listeners.forEach(f=>{try{f(chg);}catch(e){console.error(e);}});
+  }
+  function sendNow(){
+   if(!joined||dead)return;
+   lastSent=Date.now();
+   try{ch.send({type:'broadcast',event:'p',payload:{k:myPeer,p:mine}});}catch(e){}
   }
   function send(){
    if(!joined||dead)return;
    const now=Date.now();
-   if(now-lastSent<130){if(!tmo)tmo=setTimeout(()=>{tmo=null;send();},130-(now-lastSent));return;}
-   lastSent=now;ch.track({p:JSON.stringify(mine)}).catch(()=>{});
+   if(now-lastSent<110){if(!tmo)tmo=setTimeout(()=>{tmo=null;send();},110-(now-lastSent));return;}
+   sendNow();
   }
-  ch.on('presence',{event:'sync'},notify);
-  try{window.addEventListener('pagehide',()=>{try{ch.untrack();}catch(e){}});}catch(e){}
+  ch.on('broadcast',{event:'p'},msg=>{
+   const pl=msg&&msg.payload;if(!pl||!pl.k||pl.k===myPeer)return;
+   state.set(pl.k,pl.p||{});members.add(pl.k);notify();
+  });
+  ch.on('broadcast',{event:'hi'},msg=>{const pl=msg&&msg.payload;if(pl&&pl.k!==myPeer)setTimeout(sendNow,80+Math.random()*250);});
+  ch.on('broadcast',{event:'bye'},msg=>{const pl=msg&&msg.payload;if(pl&&pl.k){members.delete(pl.k);state.delete(pl.k);notify();}});
+  ch.on('presence',{event:'sync'},()=>{
+   const ps=ch.presenceState(),now=new Set(Object.keys(ps));
+   let changed=false;
+   for(const k of [...members])if(!now.has(k)){members.delete(k);state.delete(k);changed=true;}
+   for(const k of now)if(k!==myPeer&&!members.has(k)){members.add(k);changed=true;}
+   if(changed)notify();
+  });
   ch.subscribe(status=>{
    const was=joined;joined=status==='SUBSCRIBED';
-   if(joined)send();
-   if(was!==joined)connListeners.forEach(f=>{try{f(joined);}catch(e){}});
+   if(joined&&!was){
+    ch.track({t:Date.now()}).catch(()=>{});
+    try{ch.send({type:'broadcast',event:'hi',payload:{k:myPeer}});}catch(e){}
+    sendNow();
+   }
+   if(was!==joined)connL.forEach(f=>{try{f(joined);}catch(e){}});
   });
+  const ka=setInterval(()=>{if(joined&&!dead&&Object.keys(mine).length)sendNow();},3000);
+  try{window.addEventListener('pagehide',()=>{try{ch.send({type:'broadcast',event:'bye',payload:{k:myPeer}});}catch(e){}});}catch(e){}
   return{
    presence:async patch=>{mine=Object.assign({},mine);for(const k in patch){if(patch[k]===null)delete mine[k];else mine[k]=patch[k];}send();setTimeout(notify,0);},
-   onPeers:(f)=>{listeners.push(f);setTimeout(notify,0);return()=>{listeners=listeners.filter(x=>x!==f);};},
+   onPeers:f=>{listeners.push(f);setTimeout(notify,0);return()=>{listeners=listeners.filter(x=>x!==f);};},
    peers:snap,connected:()=>joined,
-   onConnection:(f)=>{connListeners.push(f);setTimeout(()=>f(joined),0);return()=>{};},
+   onConnection:f=>{connL.push(f);setTimeout(()=>f(joined),0);return()=>{};},
    emit:async()=>{},on:()=>()=>{},
-   leave:async()=>{dead=true;try{await ch.untrack();}catch(e){}try{sb.removeChannel(ch);}catch(e){}}
+   leave:async()=>{if(dead)return;try{ch.send({type:'broadcast',event:'bye',payload:{k:myPeer}});}catch(e){}dead=true;clearInterval(ka);try{await ch.untrack();}catch(e){}try{sb.removeChannel(ch);}catch(e){}}
   };
  }
  return{join:async name=>makeRoom(name),onPeers:()=>()=>{},presence:async()=>{},peers:()=>[],connected:()=>true};
@@ -935,6 +981,7 @@ function makeSupaRooms(){
  await Promise.resolve();
  try{ROOM=makeSupaRooms();}catch(e){ROOM=null;}
  ROOM_STATE=ROOM?'ok':'none';
+ if(ROOM&&UI.joinCode&&!NET)previewTable(UI.joinCode);
  if(ROOM&&ROOM.onPeers)ROOM.onPeers(()=>{},()=>{ROOM_STATE='none';render();});
  render();
  if(UI.joinCode&&ROOM&&screen==='menu')render();
@@ -962,6 +1009,7 @@ async function hostTable(){
 }
 function hostLobbyTick(){
  if(!NET||NET.role!=='host'||NET.started){clearInterval(NET&&NET.iv);return;}
+ waitClock();
  const left=LOBBY_S-(Date.now()-NET.start)/1000;
  if(NET.seats.length+1>=S.seats){NET.full=NET.full||Date.now();if(Date.now()-NET.full>1500)return hostStart();}else NET.full=0;
  if(left<=0)return hostStart();
@@ -1042,25 +1090,43 @@ function snapshot(){
 }
 function sync(){if(NET&&NET.role==='host'&&NET.started&&NET.room)hostPresence();}
 
-async function joinTable(code){
+async function previewTable(code){
  code=String(code||'').toLowerCase().replace(/[^a-z0-9]/g,'');
  if(!code)return note('הקלד קוד שולחן');
  if(!ROOM)return note('משחק עם חברים לא זמין בתצוגה הזו');
- if(!String(S.nick||'').trim())return needName();
- S.nick=cleanNick(S.nick);save();
- NET={role:'client',code,room:null,n:0,acts:[],hostPeer:null,myPeer:null,since:Date.now(),lastNote:0,st:null,gid:null};
- screen='lobby';render();
+ if(NET)leaveNet();
+ UI.joinCode=code;UI.inviteKey='';
+ NET={role:'client',code,joined:false,room:null,n:0,acts:[],hostPeer:null,myPeer:null,since:Date.now(),lastNote:0,st:null,gid:null};
+ screen='menu';render();
  NET.room=await openRoom(code);
  try{location.hash='t-'+code;}catch(e){}
- NET.room.presence({role:'p',code,nick:S.nick,hero:S.hero,acts:[],cm:false}).catch(()=>{});
  NET.room.onPeers(ch=>clientPeers(ch),()=>{});
- NET.iv=setInterval(()=>{if(NET&&NET.role==='client'&&screen==='lobby')render();},1000);
+ NET.iv=setInterval(()=>{if(!NET||NET.role!=='client')return;if(!NET.joined&&screen==='menu'&&!NET.hostP&&Date.now()-NET.since>10000&&UI.inviteKey!=='nf'){UI.inviteKey='nf';render();}if(NET.joined&&screen==='lobby')waitClock();},1000);
 }
+function confirmJoin(){
+ if(!NET||NET.role!=='client'||NET.joined)return;
+ if(!String(S.nick||'').trim())return needName();
+ S.nick=cleanNick(S.nick);save();
+ NET.joined=true;UI.joinCode='';
+ NET.room.presence({role:'p',code:NET.code,nick:S.nick,hero:S.hero,acts:[],cm:false,ch:NET.chat||[]}).catch(()=>{});
+ const st=NET.hostP&&NET.hostP.st;
+ if(st){NET.st=st;if(st.gm&&GAMES[st.gm])GAMES[st.gm].load(st);else applySnapshot(st);screen='game';}
+ else screen='lobby';
+ render();
+}
+async function joinTable(code){return previewTable(code);}
 function clientPeers(ch){
  if(!NET||NET.role!=='client')return;
- try{chatIngest(ch.peers);}catch(e){}
  const me=ch.peers.find(p=>p.isMe&&p.sameTab);if(me)NET.myPeer=me.peer;
  const host=ch.peers.find(p=>p.presence&&p.presence.role==='host'&&p.presence.code===NET.code);
+ if(!NET.joined){ // invite popup: only re-render when what it shows changes (keeps typing smooth)
+  NET.hostP=host?host.presence:null;NET.hostPeer=host?host.peer:null;
+  const lb=NET.hostP&&NET.hostP.lobby;
+  const key=NET.hostP?[NET.hostP.nick,NET.hostP.hero,lb?lb.gm:'',lb?lb.seats.length:'',lb?lb.total:'',NET.hostP.st?1:0].join('|'):'';
+  if(key!==UI.inviteKey){UI.inviteKey=key;render();}
+  return;
+ }
+ try{chatIngest(ch.peers);}catch(e){}
  if(!host){if(NET.hostPeer){NET.lost=true;}render();return;}
  NET.hostPeer=host.peer;NET.lost=false;NET.hostP=host.presence;
  const st=host.presence.st;
@@ -1365,6 +1431,7 @@ SH.botAct=function(){
  if(!cand.length)return SH.pickup(p.i,true);
  const normal=cand.filter(c=>![2,3,10].includes(c.r)).sort((a,b)=>a.r-b.r);
  let pick;
+ if(Math.random()<0.2){const r=cand[Math.floor(Math.random()*cand.length)].r;return SH.play(p.i,p[s].filter(c=>c.r===r).map(c=>c.id));} // keeps bots from looping forever
  if(normal.length)pick=normal[0].r;
  else{const sp=cand.slice().sort((a,b)=>SH.prio(a.r)-SH.prio(b.r));pick=(G.pile.length>=6&&cand.some(c=>c.r===10))?10:sp[0].r;}
  SH.play(p.i,p[s].filter(c=>c.r===pick).map(c=>c.id));
@@ -1923,6 +1990,21 @@ function scoreOv(){
 /* ---------- menu ---------- */
 function heroPicker(){return `<div class="heroes mini">${HEROES.map(x=>`<button class="hero ${S.hero===x.id?'on':''}" data-a="hero" data-v="${x.id}">${portrait(x.id)}<b>${x.name}</b><small>${x.power}</small></button>`).join('')}</div><p class="hdesc"><b>${hero(S.hero).power}.</b> ${hero(S.hero).desc}</p>`;}
 const PUB_SITE='https://germansini-lab.github.io/durak-knights/';
+function inviteOv(){
+ if(!(NET&&NET.role==='client'&&!NET.joined))return '';
+ const hp=NET.hostP,lb=hp&&hp.lobby;
+ const bad=UI.needName&&!String(S.nick||'').trim();
+ let info;
+ if(!hp)info=UI.inviteKey==='nf'?'<p class="hdesc">לא מצאנו את השולחן. אולי המשחק הסתיים, או שהמארח סגר אותו.</p>':'<p class="hdesc pulse">מתחבר לשולחן…</p>';
+ else info=`<div class="inv-host">${portrait(hero(hp.hero)?hp.hero:'kairo')}<div><b>${esc(hp.nick||'חבר')}</b> מזמין אותך לשחק<div class="inv-game">${GAME_NAMES[(lb&&lb.gm)||'durak']}</div>${lb?`<small>${lb.seats.length+1}/${lb.total} בשולחן</small>`:hp.st?'<small>המשחק כבר התחיל – תיכנס כצופה</small>':''}</div></div>`;
+ return `<div class="ov invite-ov"><div class="sheet"><h2>הוזמנת למשחק!</h2>${info}
+  <h3 class="inv-h">השם שלך</h3><input class="inp ${bad?'err':''}" id="nick" maxlength="14" placeholder="רשום את השם שלך" value="${esc(S.nick||'')}">
+  ${bad?'<p class="hdesc" style="color:#ff8a92;margin-top:6px">רשום שם כדי שהחברים יזהו אותך</p>':''}
+  <h3 class="inv-h">הדמות שלך</h3><div class="herorow">${HEROES.map(x=>`<button class="hr ${S.hero===x.id?'on':''}" data-a="hero" data-v="${x.id}" title="${x.name}">${portrait(x.id)}</button>`).join('')}</div>
+  <p class="hdesc" style="font-size:12px;text-align:center">${hero(S.hero).name} · ${hero(S.hero).power}</p>
+  <button class="btn primary big" style="margin:10px 0 6px" data-a="join" ${hp?'':'disabled'}>כן, הצטרף לשולחן</button>
+  <button class="btn ghost big" style="margin:0" data-a="nojoin">לא, תודה</button></div></div>`;
+}
 function friendsPanel(){
  if(typeof makeSupaRooms==='undefined')return `<div class="panel"><h3>משחק עם חברים</h3><p class="hdesc">משחק עם חברים מתנהל באתר הציבורי של המשחק – כל מי שמקבל את הקישור נכנס בלי הרשמה.</p>
   <a class="btn wa big" href="${PUB_SITE}" target="_blank" rel="noopener">פתח את המשחק עם חברים</a><div class="linkshow" dir="ltr">${PUB_SITE}</div></div>`;
@@ -1930,7 +2012,7 @@ function friendsPanel(){
  const nick=`<input class="inp ${bad?'err':''}" id="nick" maxlength="14" placeholder="רשום את השם שלך" value="${esc(S.nick||'')}">${bad?'<p class="hdesc" style="color:#ff8a92;margin-top:6px">רשום שם כדי שהחברים יזהו אותך</p>':''}`;
  if(ROOM_STATE==='wait')return `<div class="panel"><h3>משחק עם חברים</h3><p class="hdesc pulse">מתחבר…</p></div>`;
  if(ROOM_STATE!=='ok')return `<div class="panel"><h3>משחק עם חברים</h3><p class="hdesc">משחק עם חברים זמין כשהמשחק משותף איתם ב־Claude והם מחוברים לחשבון. בתצוגה הזו אפשר לשחק מול בוטים.</p></div>`;
- if(UI.joinCode)return `<div class="panel invite"><h3>הוזמנת לשולחן <bdi class="code">${esc(UI.joinCode)}</bdi></h3>
+ if(false)return `<div class="panel invite"><h3>הוזמנת לשולחן <bdi class="code">${esc(UI.joinCode)}</bdi></h3>
   <h3>השם שלך</h3>${nick}<h3 style="margin-top:12px">בחר דמות עם כוח מיוחד</h3>${heroPicker()}
   <button class="btn primary big" style="margin:10px 0 0" data-a="join">הצטרף לשולחן</button>
   <button class="link" data-a="nojoin">לא עכשיו</button></div>`;
@@ -1947,55 +2029,65 @@ function renderMenu(){
  <div class="title"><h1>${GAME_NAMES[S.game]}</h1><div class="sub">שולחן האבירים</div><div class="orn">✦</div></div>
  <div class="seg gsel">${Object.keys(GAME_NAMES).map(k=>`<button class="${S.game===k?'on':''}" data-a="game" data-v="${k}">${GAME_NAMES[k]}</button>`).join('')}</div>
  <p class="gdesc">${S.game==='durak'?'להיפטר מכל הקלפים – מי שנשאר אחרון הוא הדוראק. עם תחבולות, כוחות וחשיפה.':S.game==='cabo'?'4 קלפים סגורים, זיכרון ותעוזה – הסכום הנמוך מנצח. משחק עד 100 נקודות.':'3 סגורים, 3 פתוחים, 3 ביד – אל תהיה האחרון. 2 מאפס, 3 שקוף, 7 חוסם, 8 מדלג, 10 שורף.'}</p>
- ${UI.joinCode&&ROOM_STATE==='ok'?friendsPanel():`<div class="panel"><h3>בחר דמות עם כוח מיוחד</h3>${heroPicker()}</div>`}
+ <div class="panel"><h3>בחר דמות עם כוח מיוחד</h3>${heroPicker()}</div>
  ${S.game==='durak'?`<div class="panel"><h3>חפיסה</h3><div class="seg" style="margin:0">${[24,36,48].map(n=>`<button class="${S.deck===n?'on':''}" data-a="deck" data-v="${n}">${n} קלפים</button>`).join('')}</div></div>`:''}
- ${UI.joinCode&&ROOM_STATE==='ok'?'':friendsPanel()}
+ ${friendsPanel()}
  <div class="panel"><h3>משחק מול בוטים · יריבים</h3><div class="seg">${[1,2,3,4,5].map(n=>`<button class="${S.bots===n?'on':''}" data-a="bots" data-v="${n}" ${n>maxOpp()?'disabled':''}>${n}</button>`).join('')}</div>
  <h3>רמת הבוטים</h3><div class="seg">${DIFF.map((t,i)=>`<button class="${S.diff===i?'on':''}" data-a="diff" data-v="${i}">${t}</button>`).join('')}</div>
  <button class="btn primary big" style="margin:0" data-a="solo">משחק מול בוטים</button></div>
  <button class="btn big" data-a="score">טבלת תוצאות</button>
  <button class="link" data-a="rules">חוקי השולחן</button>
- </div>${UI.rules?rulesOv():''}${UI.score?scoreOv():''}`);
+ </div>${UI.rules?rulesOv():''}${UI.score?scoreOv():''}${inviteOv()}`);
 }
 /* ---------- lobby ---------- */
 function renderLobby(){
  if(!NET){screen='menu';return renderMenu();}
- let seats=[],total=S.seats,left=LOBBY_S,deck=S.deck,status='';
- if(NET.role==='host'){
-  seats=[{n:(S.nick||'מארח')+' (אתה)',h:S.hero}].concat(NET.seats.map(s=>({n:s.nick,h:s.hero})));
+ let list=[],total=S.seats,left=LOBBY_S,gm=S.game,status='';
+ const isHost=NET.role==='host';
+ if(isHost){
+  list=[{n:S.nick||'מארח',h:S.hero,me:true,host:true}].concat(NET.seats.map(s=>({n:s.nick,h:s.hero})));
   left=Math.max(0,LOBBY_S-(Date.now()-NET.start)/1000);
-  status=NET.room?'':'פותח שולחן…';
+  status=NET.room?(list.length>1?'החברים מגיעים – אפשר להתחיל מתי שתרצה':'שלח לחברים את הקישור – הם יופיעו כאן ליד השולחן'):'פותח שולחן…';
  }else{
-  const lb=NET.hostP&&NET.hostP.lobby;
+  const hp=NET.hostP,lb=hp&&hp.lobby;
   if(NET.lost)status='המארח עזב את השולחן';
-  else if(!lb)status=Date.now()-NET.since>12000?'לא נמצא שולחן פעיל עם הקוד הזה – ודא שהמארח פתח אותו':'מחפש את השולחן…';
+  else if(!lb)status='מתחבר לשולחן…';
   if(lb){
-   total=lb.total;left=lb.t;deck=lb.deck;
-   seats=[{n:(NET.hostP.nick||'מארח')+' · מארח',h:NET.hostP.hero}].concat(lb.seats.map(s=>({n:s.p===NET.myPeer?s.n+' (אתה)':s.n,h:s.h})));
-   if(!lb.seats.some(s=>s.p===NET.myPeer))status='השולחן מלא – תוכל לצפות כשהמשחק יתחיל';
+   total=lb.total;left=lb.t;gm=lb.gm||'durak';
+   list=[{n:hp.nick||'מארח',h:hp.hero,host:true}].concat(lb.seats.map(s=>({n:s.n,h:s.h,me:s.p===NET.myPeer})));
+   status=list.some(x=>x.me)?'ממתינים שהמארח יתחיל את המשחק…':'השולחן מלא – תוכל לצפות כשהמשחק יתחיל';
   }
  }
- const C=2*Math.PI*74,f=Math.min(1,left/LOBBY_S);
- setHTML(`<div class="screen">
- <div class="title"><h1 style="font-size:38px">${NET.role==='host'?'השולחן נפתח':'שולחן חברים'}</h1><div class="sub">${GAME_NAMES[NET.role==='host'?S.game:((NET.hostP&&NET.hostP.lobby&&NET.hostP.lobby.gm)||'durak')]}</div><div class="orn">✦</div></div>
- <div class="panel"><h3>${NET.role==='host'?'הזמן חברים – שלח להם את הקישור':'קוד השולחן'}</h3>
- <div class="bigcode" dir="ltr">${esc(NET.code).toUpperCase()}</div>
- ${NET.role==='host'?shareBox():''}
- ${status?`<p class="hdesc pulse">${status}</p>`:''}</div>
- <div class="clock"><svg viewBox="0 0 170 170"><circle cx="85" cy="85" r="74" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="6"/>
- <circle cx="85" cy="85" r="74" fill="none" stroke="url(#lg)" stroke-width="6" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C*(1-f)}"/>
- <defs><linearGradient id="lg"><stop offset="0" stop-color="#ecd49a"/><stop offset="1" stop-color="#7d5e22"/></linearGradient></defs></svg>
- <div class="n"><div>${Math.ceil(left)}<small>שניות להצטרפות</small></div></div></div>
- <div class="panel"><h3>אבירים בשולחן · ${seats.length}/${total}</h3><div class="seats">
- ${seats.map(s=>`<div class="seatrow">${portrait(hero(s.h)?s.h:'kairo')}<b>${esc(s.n)}</b><span class="ok-tag">✓ הצטרף</span></div>`).join('')}
- ${Array.from({length:Math.max(0,total-seats.length)},()=>`<div class="seatrow empty"><span style="width:32px;text-align:center">·</span><span class="pulse">כיסא פנוי – ממתין…</span></div>`).join('')}
- </div></div>
- <div class="panel"><h3>הדמות שלך</h3>${heroPicker()}</div>
- ${NET.role==='host'?`<button class="btn primary big" data-a="startnow">התחל עכשיו</button>`:''}
- <button class="btn big" data-a="chat">צ׳אט השולחן${CHAT.unread?` (${CHAT.unread})`:''}</button>
- <button class="btn ghost big" data-a="menu">יציאה</button>
- <p class="note">השולחן מתחיל כשכל הכיסאות מלאים או כשהזמן נגמר. כיסאות ריקים מתמלאים בבוטים.</p>
- </div>`);
+ // seat the viewer at the bottom, everyone else (and the empty chairs) around the table
+ const mi=Math.max(0,list.findIndex(x=>x.me));
+ const others=[];for(let k=1;k<total;k++)others.push(list[(mi+k)%Math.max(total,1)]||null);
+ const rot=list.slice(mi+1).concat(list.slice(0,mi));
+ const around=Array.from({length:total-1},(_,k)=>rot[k]||null);
+ const seatW=(p,pos,me)=>p?`<div class="seat ${me?'mine':''}" style="${pos};--c:${hero(hero(p.h)?p.h:'kairo').color}"><div class="med">${portrait(hero(p.h)?p.h:'kairo')}</div>
+   <div class="plate"><b>${me?'אתה':esc(p.n)}</b></div>${p.host?'<span class="role att">מארח</span>':''}</div>`
+  :`<div class="seat empty" style="${pos}"><div class="med"><span class="q">?</span></div><div class="plate"><b>כיסא פנוי</b></div></div>`;
+ const seats=around.map((p,k)=>seatW(p,seatPos(k,around.length),false)).join('')+seatW(list[mi]||{n:S.nick,h:S.hero},'left:50%;top:99%',true);
+ const C=2*Math.PI*44;
+ const center=`<div class="tbl center"><div class="waitclock"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="44" fill="none" stroke="rgba(0,0,0,.25)" stroke-width="5"/>
+  <circle id="wring" cx="50" cy="50" r="44" fill="none" stroke="#ecd49a" stroke-width="5" stroke-linecap="round" stroke-dasharray="${C}" transform="rotate(-90 50 50)"/></svg>
+  <div class="wn"><span id="wnum"></span><small>שניות</small></div></div><div class="rulechip">${list.length}/${total} בשולחן · ${GAME_NAMES[gm]}</div></div>`;
+ const acts=isHost?`<a class="btn wa" href="https://wa.me/?text=${encodeURIComponent(inviteText())}" target="_blank" rel="noopener">שלח בוואטסאפ</a><button class="btn" data-a="copy">העתק קישור</button><button class="btn primary" data-a="startnow">התחל עכשיו</button>`:'';
+ setHTML(`<div id="game" class="p${total} waiting">
+ <div class="top"><button class="ib" data-a="menu">יציאה</button><span class="gchip">${GAME_NAMES[gm]}</span><span class="sp"></span><button class="chip" dir="ltr" data-a="share">${esc(NET.code).toUpperCase()} ⤴</button>${chatBtn()}</div>
+ <div class="arena"><div class="rt"><div class="rim"></div>${DIAMONDS}<div class="inlay"></div>${CREST}${center}${seats}</div></div>
+ <div class="status"><div class="msg"><b>${isHost?'אתה המארח':'אתה בשולחן'}</b><small class="${status.endsWith('…')?'pulse':''}">${status}</small></div></div>
+ <div class="herorow" style="margin:2px 0">${HEROES.map(x=>`<button class="hr ${S.hero===x.id?'on':''}" data-a="hero" data-v="${x.id}" title="${x.name}">${portrait(x.id)}</button>`).join('')}</div>
+ <div class="acts">${acts}</div></div>${V.ui==='share'?shareOv():''}`);
+ waitClock();
+}
+function waitClock(){ // only the clock moves; the table is not redrawn every second
+ if(screen!=='lobby'||!NET||typeof document==='undefined'||!document.getElementById)return;
+ let left=LOBBY_S;
+ if(NET.role==='host')left=Math.max(0,LOBBY_S-(Date.now()-NET.start)/1000);
+ else if(NET.hostP&&NET.hostP.lobby)left=NET.hostP.lobby.t;
+ const n=document.getElementById('wnum'),r=document.getElementById('wring');
+ if(n)n.textContent=Math.ceil(left);
+ if(r){const C=2*Math.PI*44;r.setAttribute('stroke-dashoffset',(C*(1-Math.min(1,left/LOBBY_S))).toFixed(1));}
 }
 /* ---------- game ---------- */
 const SEAT_ANGLES={1:[-90],2:[-128,-52],3:[-152,-90,-28],4:[-162,-117,-63,-18],5:[-166,-128,-90,-52,-14]};
@@ -2153,8 +2245,8 @@ app.addEventListener('click',e=>{
   case 'csnap':V.pending=V.pending==='snap'?null:'snap';render();break;
   case 'cnext':V.ui=null;if(NET&&NET.role==='client')break;act({t:'next'});break;
   case 'host':hostTable();break;
-  case 'join':joinTable(UI.joinCode);break;
-  case 'nojoin':UI.joinCode='';try{history.replaceState(null,'',location.pathname+location.search);}catch(err){}render();break;
+  case 'join':confirmJoin();break;
+  case 'nojoin':leaveNet();UI.joinCode='';UI.needName=false;render();break;
   case 'joincode':{const el=document.getElementById('jcode');joinTable(el?el.value:'');break;}
   case 'rules':UI.rules=true;render();break;
   case 'chat':chatToggle(true);break;
