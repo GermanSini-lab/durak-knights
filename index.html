@@ -338,6 +338,9 @@ button{font-family:inherit;cursor:pointer}
 .seat.empty .q{color:rgba(236,212,154,.7);font-family:'Frank Ruhl Libre',serif;font-size:24px}
 .seat.empty .plate b{color:var(--mut);font-weight:500}
 .waiting .acts .btn{text-align:center;text-decoration:none}
+.loginrow{display:flex;gap:8px;margin-top:6px}.loginrow .inp{flex:1;text-align:left}
+.loginok{display:flex;justify-content:space-between;align-items:center;background:#08100b;border:1px solid rgba(127,216,160,.4);border-radius:10px;padding:8px 10px;margin-top:6px;color:#bfe9cc;font-size:13.5px}
+.loginok b{color:#fff}.loginmsg{font-size:12.5px;color:#f0c987;margin-top:5px}.regb{color:#7fd8a0;font-size:11px}
 .conn{font-size:11px;font-weight:600;margin-inline-start:6px}.conn.ok{color:#7fd8a0}.conn.bad{color:#ffb36b}
 .btn.wa{background:linear-gradient(180deg,#2bb673,#16804c);color:#fff;border-color:#9be3bd;text-align:center;text-decoration:none;margin:10px 0 8px;font-family:Heebo,sans-serif;font-weight:700}
 .sheet .btn.wa{text-align:center}
@@ -470,7 +473,7 @@ function shareBox(){
  <div class="linkshow" dir="ltr">${esc(inviteLink())}</div>`;
 }
 
-let S={hero:'kairo',deck:36,bots:1,diff:1,seats:4,nick:'',roster:null,game:'durak'};
+let S={hero:'kairo',deck:36,bots:1,diff:1,seats:4,nick:'',roster:null,game:'durak',email:''};
 try{const s=JSON.parse(localStorage.getItem('durakKnightsS')||'null');if(s)Object.assign(S,s);}catch(e){}
 S.transfer=true; // transfer is always allowed
 const save=()=>{try{localStorage.setItem('durakKnightsS',JSON.stringify(S));}catch(e){}};
@@ -869,7 +872,7 @@ function autoPass(pi){
 /* ---------- scoreboard: 1st out +2, 2nd out +1, durak −1, others 0 ---------- */
 let SBS={durak:{players:{},games:[]},cabo:{players:{},games:[]},shit:{players:{},games:[]}};
 try{const x=JSON.parse(localStorage.getItem('durakKnightsSB')||'null');if(x&&x.players)SBS.durak=x;else if(x&&x.durak)Object.assign(SBS,x);}catch(e){}
-const saveSB=()=>{try{localStorage.setItem('durakKnightsSB',JSON.stringify(SBS));}catch(e){}};
+const saveSB=()=>{try{localStorage.setItem('durakKnightsSB',JSON.stringify(SBS));}catch(e){}if(typeof cloudSave==='function')cloudSave();};
 function gamePoints(p){
  if(G.durak===p.i)return -1;
  if(p.place===1)return 2;
@@ -974,6 +977,12 @@ function makeSupaRooms(){
  }
  return{join:async name=>makeRoom(name),onPeers:()=>()=>{},presence:async()=>{},peers:()=>[],connected:()=>true};
 }
+/* registered players: login with an approved email (checked on the server), profile and score tables saved in the cloud */
+function sbClient(){
+ if(!window.supabase||!window.supabase.createClient)return null;
+ if(!window.__dkRest)window.__dkRest=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
+ return window.__dkRest;
+}
 
 /* ================= ONLINE TABLE (room capability) =================
    The host's device runs the game. Everyone shares one small presence object:
@@ -1040,9 +1049,9 @@ setInterval(()=>{ // results stay on screen for a while, then back to the table
 },1000);
 function hostPresence(){
  if(!NET||!NET.room)return;
- const base={role:'host',code:NET.code,nick:S.nick||'מארח',hero:S.hero,ch:NET.chat||[],hs:NET.hs||0};
+ const base={role:'host',code:NET.code,nick:S.nick||'מארח',hero:S.hero,ch:NET.chat||[],hs:NET.hs||0,reg:S.email?1:0};
  if(!NET.started){
-  base.lobby={gm:S.game,deck:S.deck,total:maxSeats(),t:Math.max(0,Math.ceil(LOBBY_S-(Date.now()-NET.start)/1000)),seats:NET.seats.map(s=>({p:s.peer,n:s.nick,h:s.hero}))};
+  base.lobby={gm:S.game,deck:S.deck,total:maxSeats(),t:Math.max(0,Math.ceil(LOBBY_S-(Date.now()-NET.start)/1000)),seats:NET.seats.map(s=>({p:s.peer,n:s.nick,h:s.hero,r:s.reg?1:0}))};
   base.st=null;
  }else{base.lobby=null;base.st=G.type&&G.type!=='durak'?GAMES[G.type].snap():snapshot();}
  // presence is capped at 4 KiB: trim the least important parts first
@@ -1069,8 +1078,8 @@ function hostPeers(ch){
   NET.cm[p.peer]=!!pr.cm;
   if(!NET.started){
    const s=NET.seats.find(x=>x.peer===p.peer);
-   if(s){s.nick=cleanNick(pr.nick);s.hero=hero(pr.hero)?pr.hero:'kairo';}
-   else if(NET.seats.length+1<maxSeats())NET.seats.push({peer:p.peer,nick:cleanNick(pr.nick),hero:hero(pr.hero)?pr.hero:'kairo'});
+   if(s){s.nick=cleanNick(pr.nick);s.hero=hero(pr.hero)?pr.hero:'kairo';s.reg=!!pr.reg;}
+   else if(NET.seats.length+1<maxSeats())NET.seats.push({peer:p.peer,nick:cleanNick(pr.nick),hero:hero(pr.hero)?pr.hero:'kairo',reg:!!pr.reg});
   }else if(G&&Array.isArray(pr.acts)){
    const seat=G.players.find(x=>x.peer===p.peer&&!x.bot);if(!seat)continue;
    const last=NET.lastN[p.peer]||0;
@@ -1166,7 +1175,7 @@ function confirmJoin(){
  if(!String(S.nick||'').trim())return needName();
  S.nick=cleanNick(S.nick);save();
  NET.joined=true;UI.joinCode='';
- NET.room.presence({role:'p',code:NET.code,nick:S.nick,hero:S.hero,acts:[],cm:false,ch:NET.chat||[],since:Date.now()}).catch(()=>{});
+ NET.room.presence({role:'p',code:NET.code,nick:S.nick,hero:S.hero,acts:[],cm:false,ch:NET.chat||[],since:Date.now(),reg:S.email?1:0}).catch(()=>{});
  const st=NET.hostP&&NET.hostP.st;
  if(st){NET.st=st;if(st.gm&&GAMES[st.gm])GAMES[st.gm].load(st);else applySnapshot(st);screen='game';}
  else screen='lobby';
@@ -1884,6 +1893,44 @@ CB.endOv=function(){
 const GAMES={shit:SH,cabo:CB};
 
 
+/* ================= REGISTERED PLAYERS (email) ================= */
+const cloud=()=>typeof sbClient==='function'?sbClient():null;
+const validEmail=e=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e||'');
+let cloudT=null;
+function cloudSave(){
+ if(!S.email||!cloud())return;
+ clearTimeout(cloudT);
+ cloudT=setTimeout(()=>{cloud().rpc('dk_save',{p_email:S.email,p_nick:S.nick||null,p_hero:S.hero||null,p_boards:SBS}).then(()=>{},()=>{});},1500);
+}
+function lmsg(m){UI.loginMsg=m;if(G&&G.over===false)note(m);}
+async function emailLogin(email,silent){
+ email=String(email||'').trim().toLowerCase();
+ if(!validEmail(email)){if(!silent)lmsg('כתובת האימייל לא תקינה');return false;}
+ const c=cloud();if(!c){if(!silent)lmsg('כניסה עם אימייל זמינה באתר הציבורי');return false;}
+ UI.loginBusy=true;UI.loginMsg='';render();
+ let r=null;
+ try{const res=await c.rpc('dk_login',{p_email:email});r=res&&res.data;}catch(e){r=null;}
+ UI.loginBusy=false;
+ if(!r){if(!silent)lmsg('אין חיבור לשרת – נסה שוב');render();return false;}
+ if(!r.ok){if(silent){S.email='';save();}else lmsg('האימייל הזה לא ברשימת השחקנים הקבועים');render();return false;}
+ S.email=email;
+ if(r.nick)S.nick=r.nick;
+ if(r.hero&&hero(r.hero))S.hero=r.hero;
+ if(r.boards&&r.boards.durak)SBS=Object.assign({durak:{players:{},games:[]},cabo:{players:{},games:[]},shit:{players:{},games:[]}},r.boards);
+ save();try{localStorage.setItem('durakKnightsSB',JSON.stringify(SBS));}catch(e){}
+ if(!r.boards||!r.boards.durak||!r.nick)cloudSave();
+ if(!silent)lmsg(`מחובר כ${S.nick?'־'+S.nick:'שחקן קבוע'} ✓`);
+ if(NET&&NET.room&&NET.role==='client'&&NET.joined)NET.room.presence({nick:S.nick,hero:S.hero,reg:1}).catch(()=>{});
+ render();return true;
+}
+function emailLogout(){S.email='';UI.loginMsg='';save();lmsg('התנתקת מהחשבון הקבוע');render();}
+function loginBox(compact){
+ if(!cloud())return '';
+ if(S.email)return `<div class="loginok"><span>✓ מחובר כשחקן קבוע</span><button class="link" style="margin:0" data-a="logout">התנתק</button></div>`;
+ return `<div class="loginrow"><input class="inp" id="email" type="email" inputmode="email" autocomplete="email" dir="ltr" placeholder="${compact?'שחקן קבוע? אימייל (לא חובה)':'האימייל שלך'}" value="${esc(UI.emailDraft||'')}"><button class="btn" data-a="login" ${UI.loginBusy?'disabled':''}>${UI.loginBusy?'…':'כניסה'}</button></div>${UI.loginMsg?`<div class="loginmsg">${esc(UI.loginMsg)}</div>`:''}`;
+}
+(async()=>{await Promise.resolve();if(S.email&&cloud())emailLogin(S.email,true);})();
+
 /* ================= TABLE CHAT: messages, emojis, stickers (shared through presence) ================= */
 const EMOJIS=['😀','😂','🤣','😎','🤡','🔥','👀','😱','😤','🙏','👑','💣','🃏','❤️','👍','👎','🤝','😴'];
 const STICKERS=[{id:'clown',e:'🤡',t:'דוראק!'},{id:'fire',e:'🔥',t:'בוער!'},{id:'eyes',e:'👀',t:'ראיתי אותך'},{id:'lol',e:'😂',t:'חחח'},
@@ -2057,10 +2104,11 @@ function inviteOv(){
  if(!hp)info=UI.inviteKey==='empty'?`<div class="inv-host"><div><div class="inv-game">${gname}</div><b>השולחן פנוי – אתה הראשון</b><small style="display:block">החברים שיקבלו את הקישור יצטרפו אליך</small></div></div>`:'<p class="hdesc pulse">מתחבר לשולחן…</p>';
  else info=`<div class="inv-host">${portrait(hero(hp.hero)?hp.hero:'kairo')}<div><b>${esc(hp.nick||'חבר')}</b> מזמין אותך לשחק<div class="inv-game">${GAME_NAMES[(lb&&lb.gm)||'durak']}</div>${lb?`<small>${lb.seats.length+1}/${lb.total} בשולחן</small>`:hp.st?'<small>המשחק כבר התחיל – תיכנס כצופה</small>':''}</div></div>`;
  return `<div class="ov invite-ov"><div class="sheet"><h2>${hp?'הוזמנת למשחק!':'שולחן החברים'}</h2>${info}
-  <h3 class="inv-h">השם שלך</h3><input class="inp ${bad?'err':''}" id="nick" maxlength="14" placeholder="רשום את השם שלך" value="${esc(S.nick||'')}">
+  ${S.email?loginBox(true):''}<h3 class="inv-h">השם שלך</h3><input class="inp ${bad?'err':''}" id="nick" maxlength="14" placeholder="רשום את השם שלך" value="${esc(S.nick||'')}">
   ${bad?'<p class="hdesc" style="color:#ff8a92;margin-top:6px">רשום שם כדי שהחברים יזהו אותך</p>':''}
   <h3 class="inv-h">הדמות שלך</h3><div class="herorow">${HEROES.map(x=>`<button class="hr ${S.hero===x.id?'on':''}" data-a="hero" data-v="${x.id}" title="${x.name}">${portrait(x.id)}</button>`).join('')}</div>
   <p class="hdesc" style="font-size:12px;text-align:center">${hero(S.hero).name} · ${hero(S.hero).power}</p>
+  ${S.email?'':loginBox(true)}
   <button class="btn primary big" style="margin:10px 0 6px" data-a="join" ${hp||UI.inviteKey==='empty'?'':'disabled'}>כן, שב לשולחן</button>
   <button class="btn ghost big" style="margin:0" data-a="nojoin">לא, תודה</button></div></div>`;
 }
@@ -2076,6 +2124,7 @@ function friendsPanel(){
   <button class="btn primary big" style="margin:10px 0 0" data-a="join">הצטרף לשולחן</button>
   <button class="link" data-a="nojoin">לא עכשיו</button></div>`;
  return `<div class="panel"><h3>משחק עם חברים · השם שלך</h3>${nick}
+  <h3 style="margin-top:12px">שחקנים קבועים</h3>${loginBox(false)}
   <button class="btn primary big" style="margin:12px 0 8px" data-a="friends">לשולחן ה${GAME_NAMES[S.game]} של החברים</button>
   <a class="btn wa big" style="margin:0" href="https://wa.me/?text=${encodeURIComponent(inviteText(S.game))}" target="_blank" rel="noopener">שלח לחברים קישור בוואטסאפ</a>
   <p class="hdesc" style="font-size:12.5px">יש שולחן אחד קבוע לכל משחק. כל מי שלוחץ על הקישור מגיע אליו – בלי קודים. סבב חדש מתחיל כל דקה עם מי שבשולחן.</p></div>`;
@@ -2104,7 +2153,7 @@ function renderLobby(){
  let list=[],total=maxSeats(),left=LOBBY_S,gm=S.game,status='';
  const isHost=NET.role==='host';
  if(isHost){
-  list=[{n:S.nick||'מארח',h:S.hero,me:true,host:true}].concat(NET.seats.map(s=>({n:s.nick,h:s.hero})));
+  list=[{n:S.nick||'מארח',h:S.hero,me:true,host:true,r:!!S.email}].concat(NET.seats.map(s=>({n:s.nick,h:s.hero,r:s.reg})));
   left=Math.max(0,LOBBY_S-(Date.now()-NET.start)/1000);
   status=NET.room?(list.length>1?'המשחק מתחיל כשהשעון נגמר – או לחץ "התחל עכשיו"':'שלח לחברים את הקישור – הם יופיעו כאן ליד השולחן'):'פותח שולחן…';
  }else{
@@ -2113,7 +2162,7 @@ function renderLobby(){
   else if(!lb)status='מתחבר לשולחן…';
   if(lb){
    total=lb.total;left=lb.t;gm=lb.gm||NET.code||'durak';
-   list=[{n:hp.nick||'מארח',h:hp.hero,host:true}].concat(lb.seats.map(s=>({n:s.n,h:s.h,me:s.p===NET.myPeer})));
+   list=[{n:hp.nick||'מארח',h:hp.hero,host:true,r:hp.reg}].concat(lb.seats.map(s=>({n:s.n,h:s.h,me:s.p===NET.myPeer,r:s.r})));
    status=list.some(x=>x.me)?'המשחק מתחיל כשהשעון נגמר…':'השולחן מלא – תוכל לצפות כשהמשחק יתחיל';
   }
  }
@@ -2123,7 +2172,7 @@ function renderLobby(){
  const rot=list.slice(mi+1).concat(list.slice(0,mi));
  const around=Array.from({length:total-1},(_,k)=>rot[k]||null);
  const seatW=(p,pos,me)=>p?`<div class="seat ${me?'mine':''}" style="${pos};--c:${hero(hero(p.h)?p.h:'kairo').color}"><div class="med">${portrait(hero(p.h)?p.h:'kairo')}</div>
-   <div class="plate"><b>${me?'אתה':esc(p.n)}</b></div>${p.host?'<span class="role att">מארח</span>':''}</div>`
+   <div class="plate"><b>${me?'אתה':esc(p.n)}${p.r?' <span class="regb">✓</span>':''}</b></div>${p.host?'<span class="role att">מארח</span>':''}</div>`
   :`<div class="seat empty" style="${pos}"><div class="med"><span class="q">?</span></div><div class="plate"><b>כיסא פנוי</b></div></div>`;
  const seats=around.map((p,k)=>seatW(p,seatPos(k,around.length),false)).join('')+seatW(list[mi]||{n:S.nick,h:S.hero},'left:50%;top:99%',true);
  const C=2*Math.PI*44;
@@ -2276,14 +2325,15 @@ function endOv(){
 /* ================= EVENTS ================= */
 if(app&&app.addEventListener){
 app.addEventListener('input',e=>{
- if(e.target.id==='nick'){S.nick=e.target.value.slice(0,14);save();}
+ if(e.target.id==='nick'){S.nick=e.target.value.slice(0,14);save();cloudSave();}
+ if(e.target.id==='email'){UI.emailDraft=e.target.value.slice(0,80);}
 });
 app.addEventListener('click',e=>{
  const t=e.target.closest('[data-a]');if(!t)return;
  const a=t.dataset.a,v=t.dataset.v;
  if(a==='noop'){e.stopPropagation();return;}
  switch(a){
-  case 'hero':S.hero=v;save();if(NET&&NET.room&&screen==='lobby'){if(NET.role==='client')NET.room.presence({hero:v}).catch(()=>{});else hostPresence();}render();break;
+  case 'hero':S.hero=v;save();cloudSave();if(NET&&NET.room&&screen==='lobby'){if(NET.role==='client')NET.room.presence({hero:v}).catch(()=>{});else hostPresence();}render();break;
   case 'deck':S.deck=+v;save();render();break;
   case 'bots':S.bots=+v;save();render();break;
   case 'seats':S.seats=+v;save();render();break;
@@ -2310,6 +2360,8 @@ app.addEventListener('click',e=>{
   case 'joincode':{const el=document.getElementById('jcode');joinTable(el?el.value:'');break;}
   case 'rules':UI.rules=true;render();break;
   case 'chat':chatToggle(true);break;
+  case 'login':{const el=document.getElementById('email');emailLogin(el?el.value:UI.emailDraft);break;}
+  case 'logout':emailLogout();break;
   case 'close':UI.rules=false;UI.resetArm=false;UI.score=false;if(V.ui==='score')V.ui=G&&G.over?'end':null;else if(V.ui!=='end')V.ui=null;V.pending=V.pending==='drop'?null:V.pending;render();break;
   case 'score':UI.resetArm=false;if(screen==='game'&&G)V.ui='score';else UI.score=true;render();break;
   case 'sort':UI.sort=v;render();break;
