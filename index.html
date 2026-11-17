@@ -338,6 +338,7 @@ button{font-family:inherit;cursor:pointer}
 .seat.empty .q{color:rgba(236,212,154,.7);font-family:'Frank Ruhl Libre',serif;font-size:24px}
 .seat.empty .plate b{color:var(--mut);font-weight:500}
 .waiting .acts .btn{text-align:center;text-decoration:none}
+.conn{font-size:11px;font-weight:600;margin-inline-start:6px}.conn.ok{color:#7fd8a0}.conn.bad{color:#ffb36b}
 .btn.wa{background:linear-gradient(180deg,#2bb673,#16804c);color:#fff;border-color:#9be3bd;text-align:center;text-decoration:none;margin:10px 0 8px;font-family:Heebo,sans-serif;font-weight:700}
 .sheet .btn.wa{text-align:center}
 .linkshow{margin-top:8px;font-size:12px;color:var(--gold-l);background:#08100b;border:1px dashed rgba(201,163,90,.4);border-radius:8px;padding:8px;word-break:break-all;user-select:all;-webkit-user-select:all}
@@ -460,9 +461,9 @@ const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()
 const ALPH='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 const MAXP=6;
 const ART_URL='https://claude.ai/artifact/3dYvNTwKHwEKoJmiTMXy1p';
-const SITE_URL=(()=>{try{return location.href.split('#')[0];}catch(e){return ART_URL;}})();
-const inviteLink=()=>NET?`${SITE_URL}#t-${NET.code}`:SITE_URL;
-const inviteText=()=>`בוא לשחק איתי ${GAME_NAMES[S.game]||'דוראק'} בשולחן האבירים! לחץ על הקישור, רשום שם ובחר דמות: ${inviteLink()}`;
+const PUBLIC_URL='https://germansini-lab.github.io/durak-knights/';
+const inviteLink=g=>`${PUBLIC_URL}#${g||(NET&&NET.code)||S.game}`;
+const inviteText=g=>{g=g||(NET&&NET.code)||S.game;return `בוא לשחק איתי ${GAME_NAMES[g]||'דוראק'} בשולחן האבירים! לחץ על הקישור וכנס לשולחן: ${inviteLink(g)}`;};
 function shareBox(){
  return `<a class="btn wa big" href="https://wa.me/?text=${encodeURIComponent(inviteText())}" target="_blank" rel="noopener">שלח לחברים בוואטסאפ</a>
  <button class="btn big" style="margin:0" data-a="copy">העתק קישור</button>
@@ -986,7 +987,7 @@ function makeSupaRooms(){
  render();
  if(UI.joinCode&&ROOM&&screen==='menu')render();
 })();
-(function(){try{const m=(location.hash||'').match(/^#t-([a-z0-9]{3,8})$/);if(m)UI.joinCode=m[1];}catch(e){}})();
+(function(){try{const h=(location.hash||'').replace('#','');if(['durak','cabo','shit'].includes(h))UI.joinCode=h;else if(/^t-[a-z0-9]{3,8}$/.test(h))UI.joinCode='durak';}catch(e){}})();
 const cardCode=c=>ALPH[c.id];
 function mkCode(){let s='';for(let i=0;i<5;i++)s+='abcdefghjkmnpqrstuvwxyz23456789'[Math.floor(Math.random()*31)];return s;}
 async function openRoom(code){
@@ -1011,15 +1012,37 @@ function hostLobbyTick(){
  if(!NET||NET.role!=='host'||NET.started){clearInterval(NET&&NET.iv);return;}
  waitClock();
  const left=LOBBY_S-(Date.now()-NET.start)/1000;
- if(NET.seats.length+1>=S.seats){NET.full=NET.full||Date.now();if(Date.now()-NET.full>1500)return hostStart();}else NET.full=0;
- if(left<=0)return hostStart();
+ if(NET.seats.length+1>=maxSeats()){NET.full=NET.full||Date.now();if(Date.now()-NET.full>1500)return hostStart();}else NET.full=0;
+ if(left<=0){
+  if(NET.seats.length>=1)return hostStart();   // friends are here: deal
+  NET.start=Date.now();                          // alone: keep the table open for another minute
+ }
  hostPresence();render();
 }
+// after a game the host brings everyone back to the table; the next round starts within a minute
+function hostBackToTable(){
+ if(!NET||NET.role!=='host')return;
+ clearTimeout(timer);clearTimeout(toTimer);
+ NET.started=false;NET.start=Date.now();NET.full=0;NET.seats=[];
+ screen='lobby';V.ui=null;
+ clearInterval(NET.iv);NET.iv=setInterval(hostLobbyTick,500);
+ hostPeers({peers:NET.room.peers(),joined:[],left:[],updated:[]});
+ hostPresence();render();
+}
+setInterval(()=>{ // results stay on screen for a while, then back to the table
+ if(!NET||NET.role!=='host'||!NET.started||!G)return;
+ const done=G.over||(G.type==='cabo'&&G.roundOver);
+ if(!done){G.doneAt=0;return;}
+ G.doneAt=G.doneAt||Date.now();
+ if(Date.now()-G.doneAt<15000)return;
+ if(G.type==='cabo'&&!G.over){G.doneAt=0;CB.newRound();return;}
+ hostBackToTable();
+},1000);
 function hostPresence(){
  if(!NET||!NET.room)return;
- const base={role:'host',code:NET.code,nick:S.nick||'מארח',hero:S.hero,ch:NET.chat||[]};
+ const base={role:'host',code:NET.code,nick:S.nick||'מארח',hero:S.hero,ch:NET.chat||[],hs:NET.hs||0};
  if(!NET.started){
-  base.lobby={gm:S.game,deck:S.deck,total:S.seats,t:Math.max(0,Math.ceil(LOBBY_S-(Date.now()-NET.start)/1000)),seats:NET.seats.map(s=>({p:s.peer,n:s.nick,h:s.hero}))};
+  base.lobby={gm:S.game,deck:S.deck,total:maxSeats(),t:Math.max(0,Math.ceil(LOBBY_S-(Date.now()-NET.start)/1000)),seats:NET.seats.map(s=>({p:s.peer,n:s.nick,h:s.hero}))};
   base.st=null;
  }else{base.lobby=null;base.st=G.type&&G.type!=='durak'?GAMES[G.type].snap():snapshot();}
  // presence is capped at 4 KiB: trim the least important parts first
@@ -1033,6 +1056,12 @@ function cleanNick(n){return String(n||'').replace(/[<>&"'`]/g,'').slice(0,14)||
 function hostPeers(ch){
  if(!NET||NET.role!=='host')return;
  try{chatIngest(ch.peers);}catch(e){}
+ // two players took over at the same moment: the one who did it first keeps the table
+ const rival=ch.peers.find(p=>!p.isMe&&p.presence&&p.presence.role==='host'&&p.presence.code===NET.code&&(p.presence.hs<NET.hs||(p.presence.hs===NET.hs&&p.peer<NET.myPeer)));
+ if(rival&&NET.auto&&!NET.started){const room=NET.room,code=NET.code;clearInterval(NET.iv);
+  NET={role:'client',code,joined:true,room,n:0,acts:[],hostPeer:null,myPeer:NET.myPeer,since:Date.now(),lastNote:0,st:null,gid:null,chat:NET.chat};
+  room.presence({role:'p',code,nick:S.nick,hero:S.hero,acts:[],cm:false,since:Date.now(),lobby:null,st:null,hs:null}).catch(()=>{});
+  room.onPeers(c=>clientPeers(c),()=>{});NET.iv=setInterval(clientTick,700);screen='lobby';render();return;}
  const me=ch.peers.find(p=>p.isMe&&p.sameTab);if(me)NET.myPeer=me.peer;
  for(const p of ch.peers){
   if(p.isMe&&p.sameTab)continue;
@@ -1041,7 +1070,7 @@ function hostPeers(ch){
   if(!NET.started){
    const s=NET.seats.find(x=>x.peer===p.peer);
    if(s){s.nick=cleanNick(pr.nick);s.hero=hero(pr.hero)?pr.hero:'kairo';}
-   else if(NET.seats.length+1<S.seats)NET.seats.push({peer:p.peer,nick:cleanNick(pr.nick),hero:hero(pr.hero)?pr.hero:'kairo'});
+   else if(NET.seats.length+1<maxSeats())NET.seats.push({peer:p.peer,nick:cleanNick(pr.nick),hero:hero(pr.hero)?pr.hero:'kairo'});
   }else if(G&&Array.isArray(pr.acts)){
    const seat=G.players.find(x=>x.peer===p.peer&&!x.bot);if(!seat)continue;
    const last=NET.lastN[p.peer]||0;
@@ -1057,12 +1086,14 @@ function hostPeers(ch){
 }
 function hostStart(){
  if(!NET||NET.started)return;
+ if(G&&G.over)G=null;
  clearInterval(NET.iv);NET.started=true;
  const used=new Set(NET.seats.map(s=>s.nick));
  const roster=NET.seats.map(s=>({name:s.nick,hero:s.hero,kind:'remote',peer:s.peer}));
  const names=shuffle(BOT_NAMES.filter(n=>!used.has(n)));
  const heroes=shuffle(HEROES.map(h=>h.id));
- while(roster.length+1<S.seats)roster.push({name:'בוט '+names[roster.length%names.length],hero:heroes[roster.length%6],kind:'bot'});
+ const want=roster.length?roster.length+1:Math.min(maxSeats(),1+Math.max(1,S.bots)); // friends only; alone you get bots
+ while(roster.length+1<want)roster.push({name:'בוט '+names[roster.length%names.length],hero:heroes[roster.length%6],kind:'bot'});
  startNew(roster);
 }
 function hostAgain(){
@@ -1091,24 +1122,51 @@ function snapshot(){
 function sync(){if(NET&&NET.role==='host'&&NET.started&&NET.room)hostPresence();}
 
 async function previewTable(code){
- code=String(code||'').toLowerCase().replace(/[^a-z0-9]/g,'');
- if(!code)return note('הקלד קוד שולחן');
+ code=GAME_NAMES[code]?code:S.game;
  if(!ROOM)return note('משחק עם חברים לא זמין בתצוגה הזו');
  if(NET)leaveNet();
+ S.game=code;save();
  UI.joinCode=code;UI.inviteKey='';
  NET={role:'client',code,joined:false,room:null,n:0,acts:[],hostPeer:null,myPeer:null,since:Date.now(),lastNote:0,st:null,gid:null};
  screen='menu';render();
  NET.room=await openRoom(code);
- try{location.hash='t-'+code;}catch(e){}
+ try{location.hash=code;}catch(e){}
  NET.room.onPeers(ch=>clientPeers(ch),()=>{});
- NET.iv=setInterval(()=>{if(!NET||NET.role!=='client')return;if(!NET.joined&&screen==='menu'&&!NET.hostP&&Date.now()-NET.since>10000&&UI.inviteKey!=='nf'){UI.inviteKey='nf';render();}if(NET.joined&&screen==='lobby')waitClock();},1000);
+ NET.iv=setInterval(clientTick,700);
+}
+function clientTick(){
+ if(!NET||NET.role!=='client')return;
+ if(!NET.joined){const k=NET.hostP?UI.inviteKey:(Date.now()-NET.since>3500?'empty':'');if(!NET.hostP&&UI.inviteKey!==k){UI.inviteKey=k;render();}return;}
+ if(screen==='lobby')waitClock();
+ // nobody runs the table (first one here, or the host left): the earliest player takes over
+ const host=NET.room&&NET.room.peers().find(p=>p.presence&&p.presence.role==='host'&&p.presence.code===NET.code);
+ if(host){NET.noHost=0;return;}
+ NET.noHost=NET.noHost||Date.now();
+ if(Date.now()-NET.noHost<1600)return;
+ const cands=NET.room.peers().filter(p=>p.presence&&p.presence.role==='p'&&p.presence.code===NET.code&&typeof p.presence.since==='number')
+  .sort((a,b)=>a.presence.since-b.presence.since||(a.peer<b.peer?-1:1));
+ if(cands.length&&cands[0].isMe)becomeHost();
+ else if(screen!=='lobby'){screen='lobby';V.ui=null;render();}
+}
+function becomeHost(){
+ const room=NET.room,code=NET.code,chat=NET.chat||[];
+ clearInterval(NET.iv);
+ NET={role:'host',code,room,seats:[],lastN:{},cm:{},started:false,start:Date.now(),hs:Date.now(),myPeer:NET.myPeer,full:0,chat,auto:true};
+ S.game=code;
+ screen='lobby';V.ui=null;
+ room.presence({acts:null,cm:null,since:null}).catch(()=>{});
+ room.onPeers(ch=>hostPeers(ch),()=>{});
+ NET.iv=setInterval(hostLobbyTick,500);
+ hostPresence();
+ hostPeers({peers:room.peers(),joined:[],left:[],updated:[]});
+ render();
 }
 function confirmJoin(){
  if(!NET||NET.role!=='client'||NET.joined)return;
  if(!String(S.nick||'').trim())return needName();
  S.nick=cleanNick(S.nick);save();
  NET.joined=true;UI.joinCode='';
- NET.room.presence({role:'p',code:NET.code,nick:S.nick,hero:S.hero,acts:[],cm:false,ch:NET.chat||[]}).catch(()=>{});
+ NET.room.presence({role:'p',code:NET.code,nick:S.nick,hero:S.hero,acts:[],cm:false,ch:NET.chat||[],since:Date.now()}).catch(()=>{});
  const st=NET.hostP&&NET.hostP.st;
  if(st){NET.st=st;if(st.gm&&GAMES[st.gm])GAMES[st.gm].load(st);else applySnapshot(st);screen='game';}
  else screen='lobby';
@@ -1122,7 +1180,7 @@ function clientPeers(ch){
  if(!NET.joined){ // invite popup: only re-render when what it shows changes (keeps typing smooth)
   NET.hostP=host?host.presence:null;NET.hostPeer=host?host.peer:null;
   const lb=NET.hostP&&NET.hostP.lobby;
-  const key=NET.hostP?[NET.hostP.nick,NET.hostP.hero,lb?lb.gm:'',lb?lb.seats.length:'',lb?lb.total:'',NET.hostP.st?1:0].join('|'):'';
+  const key=NET.hostP?[NET.hostP.nick,NET.hostP.hero,lb?lb.gm:'',lb?lb.seats.length:'',lb?lb.total:'',NET.hostP.st?1:0].join('|'):(Date.now()-NET.since>3500?'empty':'');
   if(key!==UI.inviteKey){UI.inviteKey=key;render();}
   return;
  }
@@ -1131,7 +1189,7 @@ function clientPeers(ch){
  NET.hostPeer=host.peer;NET.lost=false;NET.hostP=host.presence;
  const st=host.presence.st;
  if(st&&st!==NET.st){NET.st=st;if(st.gm&&GAMES[st.gm])GAMES[st.gm].load(st);else applySnapshot(st);screen='game';}
- else if(!st){if(screen==='game'&&G&&G.over){}else screen='lobby';}
+ else if(!st){if(screen!=='lobby'){screen='lobby';V.ui=null;}}
  render();
 }
 function netSend(a){
@@ -1546,7 +1604,7 @@ SH.endOv=function(){
  return `<div class="ov"><div class="sheet"><h2 style="font-size:32px">${title}</h2><p><b>${d>=0?(d===myIdx?'נשארת אחרון עם קלפים':esc(P[d].name)+' הוא השיטהד'):'תיקו'}</b></p>
  <ul class="endl">${res.map(r=>`<li><span class="nm">${portrait(r.hero)}${esc(r.name)}<small>${r.durak?'שיטהד':r.place===1?'יצא ראשון':r.place===2?'יצא שני':r.place?'מקום '+r.place:''}</small></span><span class="gp ${r.pts>0?'pos':r.pts<0?'neg':''}" dir="ltr">${r.pts>0?'+':''}${r.pts}</span></li>`).join('')}</ul>
  <h2 style="font-size:16px;margin-top:12px">טבלה מצטברת – שיטהד</h2>${scoreTable('shit')}
- ${!NET||NET.role==='host'?`<button class="btn primary" data-a="again">סיבוב נוסף</button>`:`<button class="btn" disabled>ממתין למארח…</button>`}
+ ${!NET||NET.role==='host'?`<button class="btn primary" data-a="again">סיבוב נוסף</button>`:`<button class="btn" disabled>סבב חדש מתחיל בעוד רגע…</button>`}
  <button class="btn ghost" data-a="menu">יציאה לתפריט</button></div></div>`;
 };
 
@@ -1995,19 +2053,20 @@ function inviteOv(){
  const hp=NET.hostP,lb=hp&&hp.lobby;
  const bad=UI.needName&&!String(S.nick||'').trim();
  let info;
- if(!hp)info=UI.inviteKey==='nf'?'<p class="hdesc">לא מצאנו את השולחן. אולי המשחק הסתיים, או שהמארח סגר אותו.</p>':'<p class="hdesc pulse">מתחבר לשולחן…</p>';
+ const gname=GAME_NAMES[NET.code]||'';
+ if(!hp)info=UI.inviteKey==='empty'?`<div class="inv-host"><div><div class="inv-game">${gname}</div><b>השולחן פנוי – אתה הראשון</b><small style="display:block">החברים שיקבלו את הקישור יצטרפו אליך</small></div></div>`:'<p class="hdesc pulse">מתחבר לשולחן…</p>';
  else info=`<div class="inv-host">${portrait(hero(hp.hero)?hp.hero:'kairo')}<div><b>${esc(hp.nick||'חבר')}</b> מזמין אותך לשחק<div class="inv-game">${GAME_NAMES[(lb&&lb.gm)||'durak']}</div>${lb?`<small>${lb.seats.length+1}/${lb.total} בשולחן</small>`:hp.st?'<small>המשחק כבר התחיל – תיכנס כצופה</small>':''}</div></div>`;
- return `<div class="ov invite-ov"><div class="sheet"><h2>הוזמנת למשחק!</h2>${info}
+ return `<div class="ov invite-ov"><div class="sheet"><h2>${hp?'הוזמנת למשחק!':'שולחן החברים'}</h2>${info}
   <h3 class="inv-h">השם שלך</h3><input class="inp ${bad?'err':''}" id="nick" maxlength="14" placeholder="רשום את השם שלך" value="${esc(S.nick||'')}">
   ${bad?'<p class="hdesc" style="color:#ff8a92;margin-top:6px">רשום שם כדי שהחברים יזהו אותך</p>':''}
   <h3 class="inv-h">הדמות שלך</h3><div class="herorow">${HEROES.map(x=>`<button class="hr ${S.hero===x.id?'on':''}" data-a="hero" data-v="${x.id}" title="${x.name}">${portrait(x.id)}</button>`).join('')}</div>
   <p class="hdesc" style="font-size:12px;text-align:center">${hero(S.hero).name} · ${hero(S.hero).power}</p>
-  <button class="btn primary big" style="margin:10px 0 6px" data-a="join" ${hp?'':'disabled'}>כן, הצטרף לשולחן</button>
+  <button class="btn primary big" style="margin:10px 0 6px" data-a="join" ${hp||UI.inviteKey==='empty'?'':'disabled'}>כן, שב לשולחן</button>
   <button class="btn ghost big" style="margin:0" data-a="nojoin">לא, תודה</button></div></div>`;
 }
 function friendsPanel(){
  if(typeof makeSupaRooms==='undefined')return `<div class="panel"><h3>משחק עם חברים</h3><p class="hdesc">משחק עם חברים מתנהל באתר הציבורי של המשחק – כל מי שמקבל את הקישור נכנס בלי הרשמה.</p>
-  <a class="btn wa big" href="${PUB_SITE}" target="_blank" rel="noopener">פתח את המשחק עם חברים</a><div class="linkshow" dir="ltr">${PUB_SITE}</div></div>`;
+  <a class="btn wa big" href="${PUB_SITE}#${S.game}" target="_blank" rel="noopener">פתח את שולחן ה${GAME_NAMES[S.game]} עם חברים</a><div class="linkshow" dir="ltr">${PUB_SITE}#${S.game}</div></div>`;
  const bad=UI.needName&&!String(S.nick||'').trim();
  const nick=`<input class="inp ${bad?'err':''}" id="nick" maxlength="14" placeholder="רשום את השם שלך" value="${esc(S.nick||'')}">${bad?'<p class="hdesc" style="color:#ff8a92;margin-top:6px">רשום שם כדי שהחברים יזהו אותך</p>':''}`;
  if(ROOM_STATE==='wait')return `<div class="panel"><h3>משחק עם חברים</h3><p class="hdesc pulse">מתחבר…</p></div>`;
@@ -2017,9 +2076,9 @@ function friendsPanel(){
   <button class="btn primary big" style="margin:10px 0 0" data-a="join">הצטרף לשולחן</button>
   <button class="link" data-a="nojoin">לא עכשיו</button></div>`;
  return `<div class="panel"><h3>משחק עם חברים · השם שלך</h3>${nick}
-  <h3 style="margin-top:12px">שחקנים בשולחן</h3><div class="seg">${[2,3,4,5,6].map(n=>`<button class="${S.seats===n?'on':''}" data-a="seats" data-v="${n}" ${n>maxSeats()?'disabled':''}>${n}</button>`).join('')}</div>
-  <button class="btn big" style="margin:0 0 10px" data-a="host">פתח שולחן ${GAME_NAMES[S.game]} והזמן חברים</button>
-  <div class="joinrow"><input class="inp" id="jcode" maxlength="8" placeholder="קוד שולחן" dir="ltr"><button class="btn" data-a="joincode">הצטרף</button></div></div>`;
+  <button class="btn primary big" style="margin:12px 0 8px" data-a="friends">לשולחן ה${GAME_NAMES[S.game]} של החברים</button>
+  <a class="btn wa big" style="margin:0" href="https://wa.me/?text=${encodeURIComponent(inviteText(S.game))}" target="_blank" rel="noopener">שלח לחברים קישור בוואטסאפ</a>
+  <p class="hdesc" style="font-size:12.5px">יש שולחן אחד קבוע לכל משחק. כל מי שלוחץ על הקישור מגיע אליו – בלי קודים. סבב חדש מתחיל כל דקה עם מי שבשולחן.</p></div>`;
 }
 function renderMenu(){
  const h=hero(S.hero);
@@ -2042,20 +2101,20 @@ function renderMenu(){
 /* ---------- lobby ---------- */
 function renderLobby(){
  if(!NET){screen='menu';return renderMenu();}
- let list=[],total=S.seats,left=LOBBY_S,gm=S.game,status='';
+ let list=[],total=maxSeats(),left=LOBBY_S,gm=S.game,status='';
  const isHost=NET.role==='host';
  if(isHost){
   list=[{n:S.nick||'מארח',h:S.hero,me:true,host:true}].concat(NET.seats.map(s=>({n:s.nick,h:s.hero})));
   left=Math.max(0,LOBBY_S-(Date.now()-NET.start)/1000);
-  status=NET.room?(list.length>1?'החברים מגיעים – אפשר להתחיל מתי שתרצה':'שלח לחברים את הקישור – הם יופיעו כאן ליד השולחן'):'פותח שולחן…';
+  status=NET.room?(list.length>1?'המשחק מתחיל כשהשעון נגמר – או לחץ "התחל עכשיו"':'שלח לחברים את הקישור – הם יופיעו כאן ליד השולחן'):'פותח שולחן…';
  }else{
   const hp=NET.hostP,lb=hp&&hp.lobby;
   if(NET.lost)status='המארח עזב את השולחן';
   else if(!lb)status='מתחבר לשולחן…';
   if(lb){
-   total=lb.total;left=lb.t;gm=lb.gm||'durak';
+   total=lb.total;left=lb.t;gm=lb.gm||NET.code||'durak';
    list=[{n:hp.nick||'מארח',h:hp.hero,host:true}].concat(lb.seats.map(s=>({n:s.n,h:s.h,me:s.p===NET.myPeer})));
-   status=list.some(x=>x.me)?'ממתינים שהמארח יתחיל את המשחק…':'השולחן מלא – תוכל לצפות כשהמשחק יתחיל';
+   status=list.some(x=>x.me)?'המשחק מתחיל כשהשעון נגמר…':'השולחן מלא – תוכל לצפות כשהמשחק יתחיל';
   }
  }
  // seat the viewer at the bottom, everyone else (and the empty chairs) around the table
@@ -2071,11 +2130,12 @@ function renderLobby(){
  const center=`<div class="tbl center"><div class="waitclock"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="44" fill="none" stroke="rgba(0,0,0,.25)" stroke-width="5"/>
   <circle id="wring" cx="50" cy="50" r="44" fill="none" stroke="#ecd49a" stroke-width="5" stroke-linecap="round" stroke-dasharray="${C}" transform="rotate(-90 50 50)"/></svg>
   <div class="wn"><span id="wnum"></span><small>שניות</small></div></div><div class="rulechip">${list.length}/${total} בשולחן · ${GAME_NAMES[gm]}</div></div>`;
- const acts=isHost?`<a class="btn wa" href="https://wa.me/?text=${encodeURIComponent(inviteText())}" target="_blank" rel="noopener">שלח בוואטסאפ</a><button class="btn" data-a="copy">העתק קישור</button><button class="btn primary" data-a="startnow">התחל עכשיו</button>`:'';
+ const conn=NET.room&&NET.room.connected?NET.room.connected():true;
+ const acts=`<a class="btn wa" href="https://wa.me/?text=${encodeURIComponent(inviteText())}" target="_blank" rel="noopener">הזמן בוואטסאפ</a><button class="btn" data-a="copy">העתק קישור</button>${isHost?`<button class="btn primary" data-a="startnow">${list.length>1?'התחל עכשיו':'שחק עם בוטים'}</button>`:''}`;
  setHTML(`<div id="game" class="p${total} waiting">
- <div class="top"><button class="ib" data-a="menu">יציאה</button><span class="gchip">${GAME_NAMES[gm]}</span><span class="sp"></span><button class="chip" dir="ltr" data-a="share">${esc(NET.code).toUpperCase()} ⤴</button>${chatBtn()}</div>
+ <div class="top"><button class="ib" data-a="menu">יציאה</button><span class="gchip">${GAME_NAMES[gm]}</span><span class="sp"></span>${chatBtn()}</div>
  <div class="arena"><div class="rt"><div class="rim"></div>${DIAMONDS}<div class="inlay"></div>${CREST}${center}${seats}</div></div>
- <div class="status"><div class="msg"><b>${isHost?'אתה המארח':'אתה בשולחן'}</b><small class="${status.endsWith('…')?'pulse':''}">${status}</small></div></div>
+ <div class="status"><div class="msg"><b>${isHost?'אתה פתחת את השולחן':'אתה בשולחן'} <span class="conn ${conn?'ok':'bad'}">${conn?'● מחובר':'● מתחבר…'}</span></b><small class="${status.endsWith('…')?'pulse':''}">${status}</small></div></div>
  <div class="herorow" style="margin:2px 0">${HEROES.map(x=>`<button class="hr ${S.hero===x.id?'on':''}" data-a="hero" data-v="${x.id}" title="${x.name}">${portrait(x.id)}</button>`).join('')}</div>
  <div class="acts">${acts}</div></div>${V.ui==='share'?shareOv():''}`);
  waitClock();
@@ -2209,7 +2269,7 @@ function endOv(){
  <ul class="endl">${res.map(r=>`<li><span class="nm">${portrait(r.hero)}${esc(r.name)}<small>${r.durak?'דוראק':r.place===1?'יצא ראשון':r.place===2?'יצא שני':r.place?'מקום '+r.place:''}</small></span><span class="gp ${r.pts>0?'pos':r.pts<0?'neg':''}" dir="ltr">${r.pts>0?'+':''}${r.pts}</span></li>`).join('')}</ul>
  <h2 style="font-size:16px;margin-top:12px">טבלה מצטברת</h2>${scoreTable('durak')}
  <p style="font-size:12.5px;margin-top:10px">תחבולות שלא נתפסו (${unc.length}): ${unc.length?unc.map(esc).join(' · '):'אין'}</p>
- ${canAgain?`<button class="btn primary" data-a="again">סיבוב נוסף</button>`:`<button class="btn" disabled>ממתין שהמארח יתחיל סיבוב נוסף…</button>`}
+ ${canAgain?`<button class="btn primary" data-a="again">סיבוב נוסף</button>`:`<button class="btn" disabled>סבב חדש מתחיל בעוד רגע…</button>`}
  <button class="btn" data-a="score">טבלה מלאה והיסטוריה</button><button class="btn ghost" data-a="menu">יציאה לתפריט</button></div></div>`;
 }
 
@@ -2244,7 +2304,7 @@ app.addEventListener('click',e=>{
   case 'cskip':V.sel=null;act({t:'ability',skip:1});break;
   case 'csnap':V.pending=V.pending==='snap'?null:'snap';render();break;
   case 'cnext':V.ui=null;if(NET&&NET.role==='client')break;act({t:'next'});break;
-  case 'host':hostTable();break;
+  case 'host':case 'friends':if(!String(S.nick||'').trim())return needName();previewTable(S.game).then(()=>{});break;
   case 'join':confirmJoin();break;
   case 'nojoin':leaveNet();UI.joinCode='';UI.needName=false;render();break;
   case 'joincode':{const el=document.getElementById('jcode');joinTable(el?el.value:'');break;}
@@ -2255,7 +2315,7 @@ app.addEventListener('click',e=>{
   case 'sort':UI.sort=v;render();break;
   case 'sbreset':if(!UI.resetArm){UI.resetArm=true;render();break;}{const gm=UI.sbGame||(G&&G.type)||S.game||'durak';SBS[gm]={players:{},games:[]};}saveSB();UI.resetArm=false;render();break;
   case 'sbgame':UI.sbGame=v;UI.resetArm=false;render();break;
-  case 'copy':{const txt=inviteText();try{navigator.clipboard.writeText(txt).then(()=>{t.textContent='הקישור הועתק ✓';},()=>{t.textContent='סמן את הקישור למטה והעתק';});}catch(err){t.textContent='סמן את הקישור למטה והעתק';}break;}
+  case 'copy':{const txt=inviteLink();try{navigator.clipboard.writeText(txt).then(()=>{t.textContent='הקישור הועתק ✓';},()=>{t.textContent='סמן את הקישור למטה והעתק';});}catch(err){t.textContent='סמן את הקישור למטה והעתק';}break;}
   case 'share':V.ui='share';render();break;
   case 'startnow':hostStart();break;
   case 'card':onHandTap(+v);break;
@@ -2270,7 +2330,7 @@ app.addEventListener('click',e=>{
   case 'cdrop':cheatDropUI();break;
   case 'reveal':if(!G.over&&me().lock<G.bout){V.ui='reveal';render();}break;
   case 'accuse':V.ui=null;act({t:'reveal',s:+v});render();break;
-  case 'again':clearTimeout(timer);clearTimeout(toTimer);if(NET&&NET.role==='host')hostAgain();else startNew(G.players.slice(1).map(p=>({name:p.name,hero:p.hero,kind:'bot'})));break;
+  case 'again':clearTimeout(timer);clearTimeout(toTimer);if(NET&&NET.role==='host'){hostBackToTable();hostStart();}else startNew(G.players.slice(1).map(p=>({name:p.name,hero:p.hero,kind:'bot'})));break;
   case 'menu':clearTimeout(timer);clearTimeout(toTimer);leaveNet();G=null;V={sel:null,pending:null,cheatMode:false,ui:null,toast:null};screen='menu';UI.rules=false;UI.score=false;render();break;
  }
 });
