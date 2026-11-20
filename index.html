@@ -1910,8 +1910,10 @@ const GAMES={shit:SH,cabo:CB};
 let installEvt=null;
 const isStandalone=()=>{try{return matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;}catch(e){return false;}};
 const canInstallHere=()=>typeof makeSupaRooms!=='undefined'&&!isStandalone();
+if(typeof window!=='undefined'&&window.addEventListener){
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;if(screen==='menu')render();});
 window.addEventListener('appinstalled',()=>{installEvt=null;UI.install=false;render();});
+}
 async function doInstall(){
  if(installEvt){try{installEvt.prompt();const r=await installEvt.userChoice;if(r&&r.outcome==='accepted'){installEvt=null;}}catch(e){}render();return;}
  UI.install=true;render();
