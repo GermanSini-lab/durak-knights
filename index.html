@@ -810,6 +810,18 @@ function applyAction(pi,a){
  const card=id=>p.hand.find(x=>x.id===id);
  switch(a.t){
   case 'play':{
+   if(Array.isArray(a.cs)&&a.cs.length>1){
+    if(actor()!==pi||(G.phase!=='attack'&&G.phase!=='throw'))return;
+    const cards=[...new Set(a.cs)].map(card).filter(Boolean);
+    if(cards.length<2||!cards.every(x=>x.r===cards[0].r))return noteTo(pi,'אפשר לזרוק יחד רק קלפים מאותו מספר');
+    if(!canThrow(cards[0]))return noteTo(pi,'הקלף לא מתאים לשולחן');
+    if(G.phase==='throw'&&!canAddMore())return noteTo(pi,'הגעתם למקסימום קלפי התקפה');
+    const ph=G.phase,done=[];
+    for(const x of cards){if(G.table.length&&!canAddMore())break;doThrow(pi,x,false);done.push(x);}
+    say(`${nm(p,ph==='attack'?'תקפת עם':'הוספת','תוקף עם')} ${done.map(cs).join(' ')}`);
+    if(done.length<cards.length)noteTo(pi,`נכנסו רק ${done.length} – יותר מזה המגן לא יכול לקבל`);
+    botFalseAlarm(pi);return step();
+   }
    const c=card(a.c);if(!c||actor()!==pi)return;
    if(G.phase==='attack'||G.phase==='throw'){
     if(G.phase==='throw'&&!canAddMore())return noteTo(pi,'הגעתם למקסימום קלפי התקפה');
@@ -1268,7 +1280,12 @@ function onHandTap(id){
   if(pm==='kairo'||pm==='shadow'){V.sel=null;return act({t:'power',c:id});}
   if(pm==='salaPick'){V.sel=id;V.pending='sala';return note(PENDING_TXT.sala);}
  }
- if(V.sel!==id){V.sel=id;render();return;}
+ const atk=actor()===myIdx&&(G.phase==='attack'||G.phase==='throw')&&!V.cheatMode;
+ V.dm=V.dm||[];
+ if(atk&&V.dm.length>1&&V.dm.includes(id)){const ids=V.dm.slice();V.dm=[];V.sel=null;return act({t:'play',cs:ids});}
+ if(atk&&V.sel!=null&&V.sel!==id){const sc=me().hand.find(x=>x.id===V.sel);
+  if(sc&&sc.r===c.r&&canThrow(c)){if(!V.dm.includes(V.sel))V.dm=[V.sel];if(!V.dm.includes(id))V.dm.push(id);render();return;}}
+ if(V.sel!==id){V.dm=[];V.sel=id;render();return;}
  if(actor()!==myIdx)return note('זה לא התור שלך');
  if(G.phase==='attack'||G.phase==='throw'){
   if(G.phase==='throw'&&!canAddMore())return note('הגעתם למקסימום קלפי התקפה');
@@ -1952,6 +1969,7 @@ const MUS_CH=[{b:33,pad:[57,60,64],r:[[0,69],[3,72],[6,76],[8,74],[10,72],[13,69
  {b:40,pad:[52,56,59],r:[[0,64],[3,68],[6,71],[8,74],[10,71],[13,68]]}];
 function musBuild(c){
  MUS.ctx=c;
+ const so=c.createGain();so.gain.value=0.6;so.connect(c.destination);MUS.sfxOut=so;
  const master=c.createGain();master.gain.value=0;
  const comp=c.createDynamicsCompressor();comp.threshold.value=-16;comp.ratio.value=5;comp.attack.value=0.004;comp.release.value=0.18;
  master.connect(comp);comp.connect(c.destination);MUS.master=master;
@@ -2010,23 +2028,105 @@ function musTick(){const c=MUS.ctx;if(!c)return;const sd=60/MUS.bpm/4;
 function musStart(){
  const c=musInit();if(!c||MUS.playing)return;
  MUS.playing=true;try{c.resume();}catch(e){}
+ if(S.musicSrc==='mine'&&MUS.songURL){
+  if(!MUS.audio){MUS.audio=new Audio();MUS.audio.loop=true;try{const src=c.createMediaElementSource(MUS.audio),g=c.createGain();g.gain.value=0.45;src.connect(g);g.connect(c.destination);}catch(e){MUS.audio.volume=0.45;}}
+  if(MUS.audio.src!==MUS.songURL)MUS.audio.src=MUS.songURL;
+  MUS.audio.play().catch(()=>{});return;
+ }
  MUS.next=c.currentTime+0.08;clearInterval(MUS.timer);MUS.timer=setInterval(musTick,40);
  MUS.master.gain.cancelScheduledValues(c.currentTime);MUS.master.gain.setValueAtTime(Math.max(0.0001,MUS.master.gain.value),c.currentTime);MUS.master.gain.linearRampToValueAtTime(0.2,c.currentTime+1.2);
 }
-function musStop(){
- const c=MUS.ctx;MUS.playing=false;if(!c)return;
+function musStop(quick){
+ const c=MUS.ctx;MUS.playing=false;if(MUS.audio)try{MUS.audio.pause();}catch(e){}if(!c)return;
+ if(quick){clearInterval(MUS.timer);MUS.master.gain.cancelScheduledValues(c.currentTime);MUS.master.gain.setValueAtTime(0,c.currentTime);return;}
  MUS.master.gain.cancelScheduledValues(c.currentTime);MUS.master.gain.setValueAtTime(MUS.master.gain.value,c.currentTime);MUS.master.gain.linearRampToValueAtTime(0,c.currentTime+0.4);
- setTimeout(()=>{if(!MUS.playing){clearInterval(MUS.timer);try{c.suspend();}catch(e){}}},500);
+ setTimeout(()=>{if(!MUS.playing)clearInterval(MUS.timer);},500);
 }
 const musOn=()=>S.music!==false;
 function musToggle(){S.music=!musOn();save();if(musOn())musStart();else musStop();render();}
 const musBtn=cls=>`<button class="${cls}" data-a="music" aria-label="מוזיקה">${musOn()?'♫':'<s>♫</s>'}</button>`;
 if(typeof document!=='undefined'&&document.addEventListener){
- const first=()=>{if(musOn())musStart();};
+ const first=()=>{const c=musInit();if(c)try{c.resume();}catch(e){}if(musOn())musStart();};
  document.addEventListener('pointerdown',first,{once:true,capture:true});
- document.addEventListener('visibilitychange',()=>{if(document.hidden){if(MUS.playing){musStop();MUS.resume=true;}}else if(MUS.resume&&musOn()){MUS.resume=false;musStart();}});
+ document.addEventListener('visibilitychange',()=>{if(document.hidden){if(MUS.playing){musStop(true);MUS.resume=true;}try{MUS.ctx&&MUS.ctx.suspend();}catch(e){}}else{try{MUS.ctx&&MUS.ctx.resume();}catch(e){}if(MUS.resume&&musOn()){MUS.resume=false;musStart();}}});
+ document.addEventListener('change',e=>{if(e.target&&e.target.id==='songfile'){songPicked(e.target.files&&e.target.files[0]);e.target.value='';}});
 }
 
+
+/* ---------- card sound effects (synthesized) ---------- */
+const sfxOn=()=>S.sfx!==false;
+const SFX={prev:null,tick:-1};
+function sfxCtx(){const c=musInit();if(!c)return null;if(c.state==='suspended'){try{c.resume();}catch(e){}}return c;}
+function sfN(t,type,f,peak,dec,q,f2){const c=MUS.ctx,n=c.createBufferSource(),fl=c.createBiquadFilter(),g=c.createGain();n.buffer=MUS.noise;fl.type=type;fl.frequency.setValueAtTime(f,t);if(f2)fl.frequency.exponentialRampToValueAtTime(f2,t+dec);if(q)fl.Q.value=q;
+ g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(peak,t+0.003);g.gain.exponentialRampToValueAtTime(0.0001,t+dec);n.connect(fl);fl.connect(g);g.connect(MUS.sfxOut);n.start(t,Math.random()*0.5);n.stop(t+dec+0.05);}
+function sfT(t,type,f,peak,dec,f2,lp){const c=MUS.ctx,o=c.createOscillator(),g=c.createGain();o.type=type;o.frequency.setValueAtTime(f,t);if(f2)o.frequency.exponentialRampToValueAtTime(f2,t+dec*0.8);
+ g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(peak,t+0.006);g.gain.exponentialRampToValueAtTime(0.0001,t+dec);
+ if(lp){const fl=c.createBiquadFilter();fl.type='lowpass';fl.frequency.value=lp;o.connect(fl);fl.connect(g);}else o.connect(g);g.connect(MUS.sfxOut);o.start(t);o.stop(t+dec+0.05);}
+function sfx(name,n,delay){
+ if(!sfxOn())return;const c=sfxCtx();if(!c||!MUS.sfxOut)return;n=n||1;const t0=c.currentTime+0.01+(delay||0);
+ try{
+ if(name==='place')for(let i=0;i<n;i++){const t=t0+i*0.1;sfN(t,'bandpass',2300,0.55,0.06,0.9);sfT(t,'sine',210,0.5,0.08,90);}
+ else if(name==='deal')for(let i=0;i<n;i++){const t=t0+i*0.085;sfN(t,'highpass',2600,0.28,0.045,0,5200);}
+ else if(name==='shuffle'){let t=t0;for(let i=0;i<16;i++){sfN(t,'bandpass',1800+Math.random()*1400,0.22,0.03,1.2);t+=0.028+Math.random()*0.025;}sfN(t+0.05,'bandpass',900,0.45,0.08,0.8);sfT(t+0.05,'sine',160,0.4,0.09,80);}
+ else if(name==='take'){for(let i=0;i<7;i++)sfN(t0+i*0.04,'bandpass',1400,0.3,0.04,1);sfT(t0+0.3,'sine',150,0.45,0.12,70);}
+ else if(name==='fire'){sfN(t0,'lowpass',300,0.6,1.0,1,4500);sfN(t0+0.05,'bandpass',800,0.35,0.7,0.6,2400);sfT(t0,'sine',90,0.45,0.6,45);for(let i=0;i<9;i++)sfN(t0+0.1+Math.random()*0.8,'highpass',2500,0.18,0.012);}
+ else if(name==='sweep'){sfN(t0,'bandpass',1600,0.4,0.38,0.9,380);}
+ else if(name==='turn'){sfT(t0,'sine',660,0.28,0.3);sfT(t0+0.12,'sine',990,0.26,0.5);sfT(t0+0.12,'sine',1980,0.05,0.3);}
+ else if(name==='tick')sfT(t0,'square',1700,0.07,0.03,0,4000);
+ else if(name==='win'){[523,659,784,1047].forEach((f,i)=>{sfT(t0+i*0.11,'triangle',f,0.3,0.35);sfT(t0+i*0.11,'sine',f*2,0.06,0.25);});sfT(t0+0.44,'triangle',1319,0.25,0.8);for(let i=0;i<6;i++)sfT(t0+0.5+i*0.06,'sine',2000+Math.random()*1500,0.05,0.15);}
+ else if(name==='lose'){[[392,370],[349,330],[311,277]].forEach(([a,b],i)=>sfT(t0+i*0.32,'sawtooth',a,0.18,i===2?0.9:0.3,b,900));}
+ else if(name==='end')[659,784].forEach((f,i)=>sfT(t0+i*0.12,'triangle',f,0.22,0.4));
+ }catch(e){}
+}
+function sfxSig(){
+ if(screen!=='game'||!G||!G.players)return null;
+ const t=G.type||'durak',m=G.players[myIdx]||{};let table=0,burn=0;
+ if(t==='durak'){table=(G.table||[]).reduce((a,p)=>a+1+(p.d?1:0),0);burn=G.discard||0;}
+ else if(t==='shit'){table=(G.pile||[]).length;burn=G.burned||0;}
+ else{table=(G.discard||[]).length;}
+ let turn=-1;try{turn=G.over?-1:t==='durak'?actor():(G.phase==='play'||G.phase==='turn'||G.phase==='draw')?G.turn:-1;}catch(e){}
+ return {g:(G.gid||'')+':'+(G.round||0),t,table,burn,deck:G.deck?G.deck.length:0,turn,over:!!G.over,hand:(m.hand||[]).length};
+}
+function sfxWatch(){
+ const s=sfxSig(),p=SFX.prev;SFX.prev=s;
+ if(!s){return;}
+ if(!p||s.g!==p.g){sfx('shuffle');if(s.turn===myIdx&&!(NET&&NET.spect))sfx('turn',1,0.9);return;}
+ if(s.over&&!p.over){const r=G.res&&G.res[myIdx];sfx(r?(r.pts>0?'win':r.pts<0?'lose':'end'):(G.durak===myIdx?'lose':'end'));return;}
+ if(s.burn>p.burn)sfx(s.t==='shit'?'fire':'sweep');
+ else if(s.table>p.table)sfx('place',Math.min(3,s.table-p.table));
+ else if(s.table<p.table)sfx('take');
+ if(s.deck<p.deck)sfx('deal',Math.min(4,p.deck-s.deck),0.12);
+ if(s.turn===myIdx&&p.turn!==myIdx&&!s.over&&!(NET&&NET.spect))sfx('turn',1,0.18);
+}
+function sfxTick(){
+ if(!sfxOn()||screen!=='game'||!G||G.over||!SFX.prev||SFX.prev.turn!==myIdx)return;
+ const rem=G.deadline-Date.now();if(rem<=0||rem>5000)return;
+ const sec=Math.ceil(rem/1000);if(sec!==SFX.tick){SFX.tick=sec;sfx('tick');}
+}
+
+/* ---------- your own song (stays on this phone only) ---------- */
+function songDB(){return new Promise((res,rej)=>{try{const r=indexedDB.open('dkMusic',1);r.onupgradeneeded=()=>r.result.createObjectStore('s');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);}catch(e){rej(e);}});}
+async function songPut(blob){const db=await songDB();return new Promise((res,rej)=>{const tx=db.transaction('s','readwrite');tx.objectStore('s').put(blob,'mine');tx.oncomplete=()=>res(true);tx.onerror=tx.onabort=()=>rej(tx.error);});}
+async function songGet(){const db=await songDB();return new Promise(res=>{const r=db.transaction('s').objectStore('s').get('mine');r.onsuccess=()=>res(r.result||null);r.onerror=()=>res(null);});}
+function songUse(blob){if(MUS.songURL)try{URL.revokeObjectURL(MUS.songURL);}catch(e){}MUS.songURL=URL.createObjectURL(blob);}
+async function songPicked(file){
+ if(!file)return;if(!/^audio\//.test(file.type)&&!/\.(mp3|m4a|aac|wav|ogg|flac)$/i.test(file.name))return note('זה לא קובץ שמע');
+ songUse(file);S.songName=file.name.replace(/\.[^.]+$/,'').slice(0,60);S.musicSrc='mine';S.music=true;save();
+ musStop(true);musStart();UI.songMsg='נשמר בטלפון…';render();
+ try{await songPut(file);UI.songMsg='';}catch(e){UI.songMsg='השיר גדול מדי לשמירה – יתנגן עד שתסגור את המשחק';}
+ render();
+}
+if(typeof document!=='undefined'&&typeof indexedDB!=='undefined'&&!(typeof navigator!=='undefined'&&/jsdom|Node/.test(navigator.userAgent||'')))
+ songGet().then(b=>{if(b){songUse(b);if(MUS.playing&&S.musicSrc==='mine'){musStop(true);musStart();}if(screen==='menu')render();}}).catch(()=>{});
+function musicPanel(){
+ const src=S.music===false?'off':(S.musicSrc==='mine'?'mine':'beat');
+ return `<div class="panel"><h3>מוזיקה וצלילים</h3>
+ <div class="seg">${[['beat','ביט היפ־הופ'],['mine','השיר שלי'],['off','בלי מוזיקה']].map(([k,t])=>`<button class="${src===k?'on':''}" data-a="msrc" data-v="${k}">${t}</button>`).join('')}</div>
+ ${src==='mine'?`<button class="btn" style="margin:0 0 6px" data-a="pick">${S.songName&&MUS.songURL?'♫ '+esc(S.songName)+' · החלף':'בחר שיר מהטלפון'}</button>
+  <p class="hdesc" style="font-size:12px;margin:0 0 8px">${UI.songMsg?esc(UI.songMsg):'השיר נשמר רק בטלפון שלך ומתנגן רק אצלך – לא עולה לאתר.'}</p>`:''}
+ <input type="file" id="songfile" accept="audio/*,.mp3,.m4a,.aac,.wav" style="display:none">
+ <button class="btn ${sfxOn()?'on':''}" style="margin:0" data-a="sfx">${sfxOn()?'🔊 צלילי קלפים: פועלים':'🔈 צלילי קלפים: כבויים'}</button></div>`;
+}
 /* ================= INSTALL AS APP ================= */
 let installEvt=null;
 const isStandalone=()=>{try{return matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;}catch(e){return false;}};
@@ -2198,6 +2298,7 @@ function render(){
  if(screen==='menu')renderMenu();
  else if(screen==='lobby')renderLobby();
  else if(G){if(G.type&&G.type!=='durak')GAMES[G.type].render();else renderGame();}
+ try{sfxWatch();}catch(e){}
  sync();
 }
 function rulesOv(){
@@ -2224,6 +2325,7 @@ function rulesOv(){
  <p><b>המטרה:</b> להיפטר מכל הקלפים. מי שנשאר אחרון עם קלפים הוא הדוראק.</p>
  <p><b>קוזר:</b> הצורה של הקלף שמתחת לקופה – מוצגת למעלה. קלפי קוזר מסומנים במסגרת זהב ומכים כל קלף שאינו קוזר.</p>
  <p><b>תקיפה:</b> התוקף שם קלף. להוסיף קלפים בדרגה שכבר על השולחן מותר רק <b>לשחקן שלפני המגן ולשחקן שאחריו</b> – עד <b>6 קלפי התקפה</b>, ולא יותר ממה שיש למגן ביד.</p>
+ <p><b>כמה קלפים יחד:</b> יש לך כמה קלפים מאותו מספר? גע באחד ואז באחרים מאותו מספר – הם יסומנו – ולחץ "זרוק יחד". עובד בתקיפה ובהוספה, כל עוד יש למגן מספיק קלפים.</p>
  <p><b>הגנה:</b> מכים בקלף גבוה יותר מאותה צורה, או בקוזר. אי אפשר? "לקחת".</p>
  <p><b>העברה:</b> זרקו עליך 6 ויש לך 6? שים אותו (לחיצה כפולה) – ההתקפה עוברת לשחקן הבא, והוא צריך להכות, לקחת, או להעביר הלאה. אפשר רק לפני שהכית קלף, ורק אם לשחקן הבא יש מספיק קלפים.</p>
  <p><b>שעון:</b> לכל מהלך <b>20 שניות</b>. מגן שלא הספיק – לוקח. תוקף שלא הספיק – קלף עונשין והתור עובר. מוסיף שלא הספיק – נחשב כמוותר.</p>
@@ -2305,6 +2407,7 @@ function renderMenu(){
  <div class="panel"><h3>בחר דמות עם כוח מיוחד</h3>${heroPicker()}</div>
  ${S.game==='durak'?`<div class="panel"><h3>חפיסה</h3><div class="seg" style="margin:0">${[24,36,48].map(n=>`<button class="${S.deck===n?'on':''}" data-a="deck" data-v="${n}">${n} קלפים</button>`).join('')}</div></div>`:''}
  ${friendsPanel()}
+ ${musicPanel()}
  <div class="panel"><h3>משחק מול בוטים · יריבים</h3><div class="seg">${[1,2,3,4,5].map(n=>`<button class="${S.bots===n?'on':''}" data-a="bots" data-v="${n}" ${n>maxOpp()?'disabled':''}>${n}</button>`).join('')}</div>
  <h3>רמת הבוטים</h3><div class="seg">${DIFF.map((t,i)=>`<button class="${S.diff===i?'on':''}" data-a="diff" data-v="${i}">${t}</button>`).join('')}</div>
  <button class="btn primary big" style="margin:0" data-a="solo">משחק מול בוטים</button></div>
@@ -2411,11 +2514,12 @@ function renderGame(){
  };
  const hc=m.hand.length,cw=54,avail=Math.min(typeof window!=='undefined'?window.innerWidth:400,520)-28;
  const ov=hc>1?Math.min(-6,(avail-hc*cw)/(hc-1)):0;
- const hand=(NET&&NET.spect)?'':m.hand.map(c=>cardH(c,(V.sel===c.id?'sel ':'')+(myTurn&&!legal(c)?'no':''),`data-a="card" data-v="${c.id}"`)).join('');
+ const hand=(NET&&NET.spect)?'':m.hand.map(c=>cardH(c,((V.sel===c.id||(V.dm||[]).includes(c.id))?'sel ':'')+(myTurn&&!legal(c)?'no':''),`data-a="card" data-v="${c.id}"`)).join('');
  let acts='';
  if(!(NET&&NET.spect)){
   if(myTurn&&G.phase==='defend')acts+=`<button class="btn primary" data-a="take">לקחת</button>`;
   if(myTurn&&G.phase==='defend'&&m.hand.some(canTransfer))acts+=`<button class="btn transfer" data-a="transfer">העבר ↺</button>`;
+  if(myTurn&&(G.phase==='attack'||G.phase==='throw')&&(V.dm||[]).length>1)acts+=`<button class="btn primary" data-a="dmulti">זרוק ${V.dm.length} יחד</button>`;
   if(myTurn&&G.phase==='throw')acts+=`<button class="btn primary" data-a="pass">${G.att===myIdx?'ביטה':'פס'}</button>`;
   acts+=`<button class="btn" data-a="power" ${m.powerLost||m.power<=0?'disabled':''}>${mh.power}<sup style="color:var(--gold);margin-inline-start:3px">${m.powerLost?0:m.power}</sup></button>`;
   acts+=`<button class="btn ${V.cheatMode?'on':''}" data-a="cheat">${V.cheatMode?'תחבולה פעילה':'תחבולות'}</button>`;
@@ -2469,7 +2573,7 @@ function tickTimer(){
  const t=document.getElementById('tnum');if(t){t.textContent=Math.ceil(rem/1000);t.classList.toggle('low',low);}
  const b=document.getElementById('tbar');if(b){b.style.transform=`scaleX(${f})`;b.classList.toggle('low',low);}
 }
-setInterval(tickTimer,100);
+setInterval(()=>{tickTimer();try{sfxTick();}catch(e){}},100);
 function endOv(){
  const d=G.durak,P=G.players;
  const res=(G.res||[]).map((r,i)=>Object.assign({},r,{i})).sort((a,b)=>b.pts-a.pts||(a.place||9)-(b.place||9));
@@ -2511,6 +2615,10 @@ app.addEventListener('click',e=>{
   case 'shplay':{const ids=(V.multi||[]).slice();V.multi=[];if(ids.length)act({t:'play',ids});render();break;}
   case 'shpick':V.multi=[];act({t:'pickup'});break;
   case 'shcut':V.multi=[];act({t:'cut'});break;
+  case 'dmulti':{const ids=(V.dm||[]).slice();V.dm=[];V.sel=null;if(ids.length>1)act({t:'play',cs:ids});break;}
+  case 'sfx':S.sfx=!sfxOn();save();if(sfxOn())sfx('place');render();break;
+  case 'msrc':S.musicSrc=v;S.music=v!=='off';save();if(v==='off')musStop();else{musStop(true);musStart();}render();if(v==='mine'&&!MUS.songURL){const el=document.getElementById('songfile');if(el)el.click();}break;
+  case 'pick':{const el=document.getElementById('songfile');if(el)el.click();break;}
   case 'cslot':CB.tapMine(+v);break;
   case 'oslot':CB.tapOpp(+t.dataset.p,+v);break;
   case 'cdraw':act({t:'draw'});break;
