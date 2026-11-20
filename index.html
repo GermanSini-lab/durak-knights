@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>שולחן האבירים – דוראק, קאבו, שיטהד</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0a1f14">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="שולחן האבירים">
+<script>if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=Heebo:wght@400;500;700&display=swap" rel="stylesheet">
@@ -338,6 +347,10 @@ button{font-family:inherit;cursor:pointer}
 .seat.empty .q{color:rgba(236,212,154,.7);font-family:'Frank Ruhl Libre',serif;font-size:24px}
 .seat.empty .plate b{color:var(--mut);font-weight:500}
 .waiting .acts .btn{text-align:center;text-decoration:none}
+.installb{display:flex;align-items:center;gap:12px;width:100%;margin:2px 0 12px;padding:9px 12px;text-align:right;background:linear-gradient(180deg,#14301f,#0b1d13);border:1px solid rgba(214,168,74,.55);border-radius:14px}
+.installb img{width:42px;height:42px;border-radius:10px;flex:none}.installb span{flex:1;display:flex;flex-direction:column;line-height:1.25}
+.installb b{color:#f3d68e;font-size:15px}.installb small{color:#9fb8a6;font-size:12px}.installb .iarr{flex:none;font-size:22px;color:#f3d68e}
+.isteps{text-align:right;margin:12px 0 4px;padding-right:22px;line-height:1.7;font-size:14.5px}.ikey{display:inline-block;border:1px solid rgba(255,255,255,.35);border-radius:6px;padding:0 6px;margin:0 2px}
 .loginrow{display:flex;gap:8px;margin-top:6px}.loginrow .inp{flex:1;text-align:left}
 .loginok{display:flex;justify-content:space-between;align-items:center;background:#08100b;border:1px solid rgba(127,216,160,.4);border-radius:10px;padding:8px 10px;margin-top:6px;color:#bfe9cc;font-size:13.5px}
 .loginok b{color:#fff}.loginmsg{font-size:12.5px;color:#f0c987;margin-top:5px}.regb{color:#7fd8a0;font-size:11px}
@@ -1893,6 +1906,33 @@ CB.endOv=function(){
 const GAMES={shit:SH,cabo:CB};
 
 
+/* ================= INSTALL AS APP ================= */
+let installEvt=null;
+const isStandalone=()=>{try{return matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;}catch(e){return false;}};
+const canInstallHere=()=>typeof makeSupaRooms!=='undefined'&&!isStandalone();
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;if(screen==='menu')render();});
+window.addEventListener('appinstalled',()=>{installEvt=null;UI.install=false;render();});
+async function doInstall(){
+ if(installEvt){try{installEvt.prompt();const r=await installEvt.userChoice;if(r&&r.outcome==='accepted'){installEvt=null;}}catch(e){}render();return;}
+ UI.install=true;render();
+}
+function installOv(){
+ const ua=navigator.userAgent||'',ios=/iPhone|iPad|iPod/.test(ua)||(/Macintosh/.test(ua)&&'ontouchend' in document),android=/Android/.test(ua);
+ const inApp=/WhatsApp|FBAN|FBAV|Instagram|Line\/|; wv\)/.test(ua);
+ let steps;
+ if(ios)steps=`${inApp?'<li>לחץ על <b>⋯</b> או על סמל המצפן ופתח את הקישור ב־<b>Safari</b></li>':''}
+  <li>לחץ על כפתור השיתוף <span class="ikey">⬆︎</span> בתחתית המסך</li>
+  <li>גלול ובחר <b>"הוסף למסך הבית"</b></li><li>לחץ <b>"הוסף"</b> – הסמל יופיע ליד שאר האפליקציות</li>`;
+ else if(android)steps=`${inApp?'<li>לחץ על <b>⋮</b> למעלה ובחר <b>"פתח ב־Chrome"</b></li>':''}
+  <li>ב־Chrome לחץ על <b>⋮</b> בפינה העליונה</li><li>בחר <b>"התקן אפליקציה"</b> או <b>"הוסף למסך הבית"</b></li><li>אשר – הסמל יופיע במסך הבית</li>`;
+ else steps=`<li>בדפדפן Chrome או Edge לחץ על סמל ההתקנה <span class="ikey">⊕</span> בשורת הכתובת</li><li>או פתח את הקישור בטלפון והתקן משם</li>`;
+ return `<div class="ov" data-a="close"><div class="sheet" data-a="noop" style="text-align:center">
+  <img src="icon-192.png" alt="" style="width:84px;height:84px;border-radius:20px;box-shadow:0 6px 18px rgba(0,0,0,.5)">
+  <h2 style="margin:10px 0 4px">התקנה בטלפון</h2><p class="hdesc">פותחים מהסמל במסך הבית – מסך מלא, בלי שורת כתובת, כמו אפליקציה.</p>
+  <ol class="isteps">${steps}</ol>
+  <button class="btn primary big" style="margin:8px 0 0;text-align:center;justify-content:center" data-a="close">הבנתי</button></div></div>`;
+}
+
 /* ================= REGISTERED PLAYERS (email) ================= */
 const cloud=()=>typeof sbClient==='function'?sbClient():null;
 const validEmail=e=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e||'');
@@ -2135,6 +2175,7 @@ function renderMenu(){
  if(S.seats>maxSeats())S.seats=maxSeats();
  setHTML(`<div class="screen">
  <div class="title"><h1>${GAME_NAMES[S.game]}</h1><div class="sub">שולחן האבירים</div><div class="orn">✦</div></div>
+ ${canInstallHere()?`<button class="btn installb" data-a="install"><img src="icon-192.png" alt=""><span><b>התקן כאפליקציה בטלפון</b><small>סמל במסך הבית · מסך מלא</small></span><span class="iarr">⤓</span></button>`:''}
  <div class="seg gsel">${Object.keys(GAME_NAMES).map(k=>`<button class="${S.game===k?'on':''}" data-a="game" data-v="${k}">${GAME_NAMES[k]}</button>`).join('')}</div>
  <p class="gdesc">${S.game==='durak'?'להיפטר מכל הקלפים – מי שנשאר אחרון הוא הדוראק. עם תחבולות, כוחות וחשיפה.':S.game==='cabo'?'4 קלפים סגורים, זיכרון ותעוזה – הסכום הנמוך מנצח. משחק עד 100 נקודות.':'3 סגורים, 3 פתוחים, 3 ביד – אל תהיה האחרון. 2 מאפס, 3 שקוף, 7 חוסם, 8 מדלג, 10 שורף.'}</p>
  <div class="panel"><h3>בחר דמות עם כוח מיוחד</h3>${heroPicker()}</div>
@@ -2145,7 +2186,7 @@ function renderMenu(){
  <button class="btn primary big" style="margin:0" data-a="solo">משחק מול בוטים</button></div>
  <button class="btn big" data-a="score">טבלת תוצאות</button>
  <button class="link" data-a="rules">חוקי השולחן</button>
- </div>${UI.rules?rulesOv():''}${UI.score?scoreOv():''}${inviteOv()}`);
+ </div>${UI.rules?rulesOv():''}${UI.score?scoreOv():''}${UI.install?installOv():''}${inviteOv()}`);
 }
 /* ---------- lobby ---------- */
 function renderLobby(){
@@ -2359,10 +2400,11 @@ app.addEventListener('click',e=>{
   case 'nojoin':leaveNet();UI.joinCode='';UI.needName=false;render();break;
   case 'joincode':{const el=document.getElementById('jcode');joinTable(el?el.value:'');break;}
   case 'rules':UI.rules=true;render();break;
+  case 'install':doInstall();break;
   case 'chat':chatToggle(true);break;
   case 'login':{const el=document.getElementById('email');emailLogin(el?el.value:UI.emailDraft);break;}
   case 'logout':emailLogout();break;
-  case 'close':UI.rules=false;UI.resetArm=false;UI.score=false;if(V.ui==='score')V.ui=G&&G.over?'end':null;else if(V.ui!=='end')V.ui=null;V.pending=V.pending==='drop'?null:V.pending;render();break;
+  case 'close':UI.rules=false;UI.install=false;UI.resetArm=false;UI.score=false;if(V.ui==='score')V.ui=G&&G.over?'end':null;else if(V.ui!=='end')V.ui=null;V.pending=V.pending==='drop'?null:V.pending;render();break;
   case 'score':UI.resetArm=false;if(screen==='game'&&G)V.ui='score';else UI.score=true;render();break;
   case 'sort':UI.sort=v;render();break;
   case 'sbreset':if(!UI.resetArm){UI.resetArm=true;render();break;}{const gm=UI.sbGame||(G&&G.type)||S.game||'durak';SBS[gm]={players:{},games:[]};}saveSB();UI.resetArm=false;render();break;
