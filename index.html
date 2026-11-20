@@ -347,10 +347,14 @@ button{font-family:inherit;cursor:pointer}
 .seat.empty .q{color:rgba(236,212,154,.7);font-family:'Frank Ruhl Libre',serif;font-size:24px}
 .seat.empty .plate b{color:var(--mut);font-weight:500}
 .waiting .acts .btn{text-align:center;text-decoration:none}
+.musfix{position:fixed;top:calc(env(safe-area-inset-top) + 12px);left:12px;z-index:5;width:40px;height:40px;border-radius:50%;background:rgba(10,30,20,.85);border:1px solid rgba(214,168,74,.55);color:#f3d68e;font-size:19px;line-height:1}
+.musfix s,.mus s{opacity:.55}
 .installb{display:flex;align-items:center;gap:12px;width:100%;margin:2px 0 12px;padding:9px 12px;text-align:right;background:linear-gradient(180deg,#14301f,#0b1d13);border:1px solid rgba(214,168,74,.55);border-radius:14px}
 .installb img{width:42px;height:42px;border-radius:10px;flex:none}.installb span{flex:1;display:flex;flex-direction:column;line-height:1.25}
 .installb b{color:#f3d68e;font-size:15px}.installb small{color:#9fb8a6;font-size:12px}.installb .iarr{flex:none;font-size:22px;color:#f3d68e}
 .isteps{text-align:right;margin:12px 0 4px;padding-right:22px;line-height:1.7;font-size:14.5px}.ikey{display:inline-block;border:1px solid rgba(255,255,255,.35);border-radius:6px;padding:0 6px;margin:0 2px}
+.cutb{animation:cutp 0.9s ease-in-out infinite;background:linear-gradient(180deg,#ffb35c,#d9541e)!important;color:#1a0b02!important;border-color:#ffcf8a!important}
+@keyframes cutp{50%{transform:scale(1.05);box-shadow:0 0 22px rgba(255,140,40,.75)}}
 .loginrow{display:flex;gap:8px;margin-top:6px}.loginrow .inp{flex:1;text-align:left}
 .loginok{display:flex;justify-content:space-between;align-items:center;background:#08100b;border:1px solid rgba(127,216,160,.4);border-radius:10px;padding:8px 10px;margin-top:6px;color:#bfe9cc;font-size:13.5px}
 .loginok b{color:#fff}.loginmsg{font-size:12.5px;color:#f0c987;margin-top:5px}.regb{color:#7fd8a0;font-size:11px}
@@ -1394,7 +1398,7 @@ function oppSeats(fn){
 }
 function topBar(){
  return `<div class="top"><button class="ib" data-a="menu">יציאה</button><span class="gchip">${GAME_NAMES[G.type]}</span><span class="sp"></span>
- ${NET?`<button class="chip" dir="ltr" data-a="share">${esc(NET.code).toUpperCase()} ⤴</button>`:''}${chatBtn()}<button class="ib" data-a="score">טבלה</button><button class="ib" data-a="rules">?</button></div>`;
+ ${NET?`<button class="chip" dir="ltr" data-a="share">${esc(NET.code).toUpperCase()} ⤴</button>`:''}${chatBtn()}<button class="ib" data-a="score">טבלה</button>${musBtn('ib mus')}<button class="ib" data-a="rules">?</button></div>`;
 }
 function tableShell(inner,seats){
  const now=Date.now();
@@ -1463,6 +1467,7 @@ SH.step=function(){
  const p=G.players[G.turn];if(p.out){G.turn=nextFrom(G.turn,1);return SH.step();}
  G.deadline=Math.max(Date.now(),G.pauseUntil)+TURN_MS;render();
  gTimers(SH.botAct,SH.timeout);
+ SH.botCut();
 };
 SH.playable=p=>{const s=SH.src(p);if(s==='hand'||s==='up')return p[s].filter(c=>SH.canRank(c.r));return [];};
 SH.timeout=function(){const p=G.players[G.turn];if(!G.pile.length){const s=SH.src(p);if(s==='down')return SH.flip(p.i,0);const c=p[s].slice().sort((a,b)=>SH.prio(a.r)-SH.prio(b.r))[0];return SH.play(p.i,[c.id]);}
@@ -1485,6 +1490,32 @@ SH.flip=function(pi,k){
  if(SH.canRank(c.r)){G.pile.push(c);G.lastId=c.id;say(`${nm(p,'הפכת','הפך')} ${cs(c)} – מתאים!`);return SH.after(pi,c.r,1);}
  G.pile.push(c);G.lastId=c.id;toast(`${cs(c)} לא מתאים – ${nm(p,'אתה לוקח','לוקח')} את הערימה`);
  G.pauseUntil=Date.now()+1200;SH.pickup(pi,true);
+};
+/* cut-in: out of turn, a player whose matching cards complete four of a kind on top of the pile may jump in, burn it and play again */
+SH.run=()=>{const P=G.pile;let i=P.length-1;const t=P[i];if(!t)return 0;let n=0;while(i>=0&&P[i]&&P[i].r===t.r){n++;i--;}return n;};
+SH.cutCards=p=>{
+ if(!G||G.over||G.phase!=='play'||!p||p.out||G.turn===p.i)return [];
+ const s=SH.src(p);if(s!=='hand'&&s!=='up')return [];
+ const t=G.pile[G.pile.length-1];if(!t)return [];
+ const mine=p[s].filter(c=>c.r===t.r);
+ return mine.length&&SH.run()+mine.length>=4?mine:[];
+};
+SH.cut=function(pi){
+ const p=G.players[pi],cards=SH.cutCards(p);if(!cards.length)return;
+ const s=SH.src(p);
+ cards.forEach(c=>{p[s].splice(p[s].indexOf(c),1);G.pile.push(c);});G.lastId=cards[cards.length-1].id;
+ if(s==='hand')while(p.hand.length<3&&G.deck.length)p.hand.push(G.deck.pop());
+ SH.sort(p);
+ say(`${nm(p,'התפרצת','התפרץ')} עם ${cards.map(cs).join(' ')}!`);
+ G.pauseUntil=Date.now()+900;
+ SH.after(pi,cards[0].r,cards.length);
+ if(!G.over&&G.turn===pi)toast(`${nm(p,'התפרצת','התפרץ')} – רביעייה! הערימה נשרפה`);
+};
+SH.botCut=function(){
+ clearTimeout(SH.cutT);if(G.over||G.phase!=='play')return;
+ const cand=G.players.filter(p=>p.bot&&SH.cutCards(p).length);if(!cand.length||Math.random()<0.25)return;
+ const b=cand[Math.floor(Math.random()*cand.length)],g=G,t=G.tick;
+ SH.cutT=setTimeout(()=>{if(G===g&&!G.over&&G.tick===t)SH.cut(b.i);},FAST?0:650+Math.random()*900);
 };
 SH.burnCheck=()=>{const n=G.pile.length;if(n<4)return false;const r=G.pile[n-1].r;for(let i=n-4;i<n;i++)if(G.pile[i].r!==r)return false;return true;};
 SH.after=function(pi,r,count){
@@ -1529,6 +1560,7 @@ SH.act=function(pi,a){
  if(a.t==='play')return SH.play(pi,a.ids||[]);
  if(a.t==='down')return SH.flip(pi,a.k|0);
  if(a.t==='pickup')return SH.pickup(pi);
+ if(a.t==='cut')return SH.cut(pi);
 };
 SH.snap=function(){
  const now=Date.now();
@@ -1566,6 +1598,7 @@ SH.tap=function(id){
  const s=SH.src(m);
  const card=(s==='hand'||s==='up')?m[s].find(c=>c.id===id):null;if(!card)return;
  V.multi=V.multi||[];
+ if(G.turn!==myIdx&&SH.cutCards(m).some(c=>c.id===id)){V.multi=[];return act({t:'cut'});}
  if(V.multi.includes(id)){ // second tap on a selected card plays the selection
   if(G.turn!==myIdx)return note('זה לא התור שלך');
   const ids=V.multi.slice();V.multi=[];return act({t:'play',ids});
@@ -1603,6 +1636,9 @@ SH.render=function(){
  const hc=handCards.length,avail=Math.min(typeof window!=='undefined'?window.innerWidth:400,520)-28,ov=hc>1?Math.min(-6,(avail-hc*54)/(hc-1)):0;
  const hand=handCards.map(c=>cardH(c,`${sel(c.id)?'sel':''} ${(myTurn&&!ok(c))?'no':''}`,`data-a="shcard" data-v="${c.id}"`)).join('');
  let acts='';
+ const cutC=(NET&&NET.spect)?[]:SH.cutCards(m);
+ if(cutC.length){acts+=`<button class="btn primary cutb" data-a="shcut">🔥 התפרץ ושרוף · ${cutC.length>1?cutC.length+'×':''}${rl(cutC[0].r)}</button>`;
+  status=`<b>אפשר להתפרץ!</b><small>יש לך ${cutC.length>1?cutC.length+' קלפי':'את ה־'}${rl(cutC[0].r)} שמשלים רביעייה – שורפים ומשחקים שוב</small>`;}
  if(G.phase==='swap'&&!m.ready&&!(NET&&NET.spect))acts+=`<button class="btn primary" data-a="shready">מוכן</button>`;
  if(myTurn&&(s==='hand'||s==='up')){
   if((V.multi||[]).length)acts+=`<button class="btn primary" data-a="shplay">שחק ${(V.multi||[]).length>1?'('+V.multi.length+')':''}</button>`;
@@ -1906,6 +1942,82 @@ CB.endOv=function(){
 const GAMES={shit:SH,cabo:CB};
 
 
+/* ================= BACKGROUND MUSIC – original West-Coast / G-funk groove, synthesized live (no audio files) ================= */
+const MUS={ctx:null,timer:null,step:0,next:0,bpm:92,playing:false};
+const mf=m=>440*Math.pow(2,(m-69)/12);
+const MUS_A=[{b:36,c:[51,55,58,62]},{b:41,c:[56,60,63,67]},{b:44,c:[55,60,63,67]},{b:43,c:[53,59,62,65]}];
+const MUS_B=[{b:39,c:[55,58,62,63]},{b:38,c:[53,56,60,62]},{b:36,c:[51,55,58,62]},{b:43,c:[53,56,59,62]}];
+const MUS_BASS=[[0,0,3,0],[3,0,1,0],[6,12,2,1],[10,7,1,0],[11,10,1,0],[14,0,2,1]];
+const MUS_LEAD=[[[0,79,4],[4,77,2],[6,75,2],[8,72,6],[14,75,2]],[[0,74,6],[8,70,4],[12,72,4]],[[0,79,3],[3,82,3],[6,79,2],[8,77,4],[12,75,4]],[[0,74,4],[4,72,4],[8,67,8]]];
+function musInit(){
+ if(MUS.ctx)return MUS.ctx;
+ const AC=typeof window!=='undefined'&&(window.AudioContext||window.webkitAudioContext);if(!AC)return null;
+ const c=new AC();MUS.ctx=c;
+ const master=c.createGain();master.gain.value=0;
+ const comp=c.createDynamicsCompressor();comp.threshold.value=-20;comp.ratio.value=4;
+ master.connect(comp);comp.connect(c.destination);MUS.master=master;
+ const dl=c.createDelay(1.5);dl.delayTime.value=60/MUS.bpm*0.75;const fb=c.createGain();fb.gain.value=0.33;
+ const lp=c.createBiquadFilter();lp.type='lowpass';lp.frequency.value=2400;
+ dl.connect(lp);lp.connect(fb);fb.connect(dl);lp.connect(master);MUS.fx=dl;
+ const nb=c.createBuffer(1,c.sampleRate,c.sampleRate),d=nb.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;MUS.noise=nb;
+ return c;
+}
+function mEnv(g,t,peak,att,dec){g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(peak,t+att);g.gain.exponentialRampToValueAtTime(0.0001,t+att+dec);}
+function mKick(t){const c=MUS.ctx,o=c.createOscillator(),g=c.createGain();o.frequency.setValueAtTime(140,t);o.frequency.exponentialRampToValueAtTime(42,t+0.13);mEnv(g,t,0.9,0.004,0.36);o.connect(g);g.connect(MUS.master);o.start(t);o.stop(t+0.45);}
+function mNoise(t,hp,peak,dec,fx){const c=MUS.ctx,n=c.createBufferSource(),f=c.createBiquadFilter(),g=c.createGain();n.buffer=MUS.noise;f.type='highpass';f.frequency.value=hp;mEnv(g,t,peak,0.002,dec);n.connect(f);f.connect(g);g.connect(MUS.master);if(fx){const s=c.createGain();s.gain.value=fx;g.connect(s);s.connect(MUS.fx);}n.start(t,Math.random()*0.5);n.stop(t+dec+0.05);}
+function mSnare(t){mNoise(t,1400,0.42,0.2,0.12);const c=MUS.ctx,o=c.createOscillator(),g=c.createGain();o.type='triangle';o.frequency.value=185;mEnv(g,t,0.22,0.002,0.1);o.connect(g);g.connect(MUS.master);o.start(t);o.stop(t+0.15);}
+function mBass(t,m,dur,glide){const c=MUS.ctx,o=c.createOscillator(),s=c.createOscillator(),f=c.createBiquadFilter(),g=c.createGain();
+ o.type='sawtooth';s.type='sine';const fr=mf(m);
+ if(glide){o.frequency.setValueAtTime(fr*0.84,t);o.frequency.exponentialRampToValueAtTime(fr,t+0.06);s.frequency.setValueAtTime(fr*0.84,t);s.frequency.exponentialRampToValueAtTime(fr,t+0.06);}else{o.frequency.value=fr;s.frequency.value=fr;}
+ f.type='lowpass';f.Q.value=5;f.frequency.setValueAtTime(900,t);f.frequency.exponentialRampToValueAtTime(220,t+dur);
+ g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(0.32,t+0.01);g.gain.setValueAtTime(0.28,t+dur*0.8);g.gain.exponentialRampToValueAtTime(0.0001,t+dur+0.05);
+ const sg=c.createGain();sg.gain.value=0.9;o.connect(f);s.connect(sg);sg.connect(g);f.connect(g);g.connect(MUS.master);o.start(t);s.start(t);o.stop(t+dur+0.1);s.stop(t+dur+0.1);}
+function mKeys(t,notes,dur,peak){const c=MUS.ctx,f=c.createBiquadFilter(),g=c.createGain();f.type='lowpass';f.frequency.value=2000;
+ g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(peak,t+0.008);g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+ const trem=c.createOscillator(),td=c.createGain();trem.frequency.value=5.2;td.gain.value=peak*0.25;trem.connect(td);td.connect(g.gain);trem.start(t);trem.stop(t+dur+0.05);
+ notes.forEach(m=>{const o=c.createOscillator();o.type='triangle';o.frequency.value=mf(m);o.detune.value=(Math.random()-.5)*8;o.connect(f);o.start(t);o.stop(t+dur+0.05);});
+ f.connect(g);g.connect(MUS.master);const s=c.createGain();s.gain.value=0.25;g.connect(s);s.connect(MUS.fx);}
+function mLead(t,m,dur,from){const c=MUS.ctx,o=c.createOscillator(),f=c.createBiquadFilter(),g=c.createGain(),v=c.createOscillator(),vd=c.createGain();
+ o.type='square';const fr=mf(m);o.frequency.setValueAtTime(from?mf(from):fr*0.94,t);o.frequency.setTargetAtTime(fr,t,0.035);
+ v.frequency.value=5.6;vd.gain.value=fr*0.012;v.connect(vd);vd.connect(o.frequency);
+ f.type='lowpass';f.frequency.value=1500;f.Q.value=2;
+ g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(0.075,t+0.03);g.gain.setValueAtTime(0.065,t+dur*0.85);g.gain.exponentialRampToValueAtTime(0.0001,t+dur+0.08);
+ o.connect(f);f.connect(g);g.connect(MUS.master);const s=c.createGain();s.gain.value=0.55;g.connect(s);s.connect(MUS.fx);
+ o.start(t);v.start(t);o.stop(t+dur+0.12);v.stop(t+dur+0.12);}
+function musStep(st,t,sd){
+ const bar=Math.floor(st/16),k=st%16,sec=Math.floor(bar/8)%4,prog=sec===2?MUS_B:MUS_A,ch=prog[bar%4];
+ if(k===0||k===7||k===10||(k===3&&bar%4===3))mKick(t);
+ if(k===4||k===12)mSnare(t);
+ if(k%2===0)mNoise(t,7200,k===14&&bar%2?0.09:0.07,k===14&&bar%2?0.28:0.045);
+ else if(k===15||k===7)mNoise(t,8000,0.035,0.03);
+ for(const [s0,iv,d,gl] of MUS_BASS)if(s0===k)mBass(t,ch.b+iv,d*sd*0.95,gl);
+ if(k===0)mKeys(t,ch.c,sd*7,0.05);if(k===10)mKeys(t,ch.c,sd*2.5,0.04);
+ if(sec!==0&&bar%8>=4){const ph=MUS_LEAD[(bar%8-4)+(sec===3?0:0)];let prev=null;
+  for(const [s0,m,d] of ph){if(s0===k){mLead(t,m,d*sd*0.95,MUS.lastLead||null);MUS.lastLead=m;}prev=m;}}
+}
+function musTick(){const c=MUS.ctx;if(!c)return;const sd=60/MUS.bpm/4;
+ if(MUS.next<c.currentTime)MUS.next=c.currentTime+0.05;
+ while(MUS.next<c.currentTime+0.25){musStep(MUS.step,MUS.next+(MUS.step%2?sd*0.2:0),sd);MUS.next+=sd;MUS.step++;}}
+function musStart(){
+ const c=musInit();if(!c||MUS.playing)return;
+ MUS.playing=true;try{c.resume();}catch(e){}
+ MUS.next=c.currentTime+0.08;clearInterval(MUS.timer);MUS.timer=setInterval(musTick,40);
+ MUS.master.gain.cancelScheduledValues(c.currentTime);MUS.master.gain.setValueAtTime(Math.max(0.0001,MUS.master.gain.value),c.currentTime);MUS.master.gain.linearRampToValueAtTime(0.2,c.currentTime+1.2);
+}
+function musStop(){
+ const c=MUS.ctx;MUS.playing=false;if(!c)return;
+ MUS.master.gain.cancelScheduledValues(c.currentTime);MUS.master.gain.setValueAtTime(MUS.master.gain.value,c.currentTime);MUS.master.gain.linearRampToValueAtTime(0,c.currentTime+0.4);
+ setTimeout(()=>{if(!MUS.playing){clearInterval(MUS.timer);try{c.suspend();}catch(e){}}},500);
+}
+const musOn=()=>S.music!==false;
+function musToggle(){S.music=!musOn();save();if(musOn())musStart();else musStop();render();}
+const musBtn=cls=>`<button class="${cls}" data-a="music" aria-label="מוזיקה">${musOn()?'♫':'<s>♫</s>'}</button>`;
+if(typeof document!=='undefined'&&document.addEventListener){
+ const first=()=>{if(musOn())musStart();};
+ document.addEventListener('pointerdown',first,{once:true,capture:true});
+ document.addEventListener('visibilitychange',()=>{if(document.hidden){if(MUS.playing){musStop();MUS.resume=true;}}else if(MUS.resume&&musOn()){MUS.resume=false;musStart();}});
+}
+
 /* ================= INSTALL AS APP ================= */
 let installEvt=null;
 const isStandalone=()=>{try{return matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;}catch(e){return false;}};
@@ -2086,6 +2198,7 @@ function rulesOv(){
  <p><b>חלוקה:</b> 3 קלפים סגורים, 3 פתוחים מעליהם ו־3 ביד. לפני ההתחלה אפשר להחליף בין היד לפתוחים (גע בקלף ביד ואז בקלף פתוח).</p>
  <p><b>תור:</b> שמים קלף אחד או כמה מאותו מספר, שווה או גבוה מהקלף העליון. אחרי משחק מהיד משלימים ל־3 מהקופה. אין מה לשים? לוקחים את כל הערימה.</p>
  <p><b>קלפים מיוחדים:</b> 2 מאפס · 3 שקוף (מחקה את הקלף שמתחתיו) · 7 – הבא חייב 7 ומטה · 8 מדלג על הבא (שני 8 – על שניים) · 10 שורף את הערימה ומקבלים תור נוסף · ארבעה זהים ברצף – שורפים ותור נוסף.</p>
+ <p><b>התפרצות:</b> אם בראש הערימה יש קלפים זהים ויש לך את הקלפים שמשלימים אותם לרביעייה – מותר להתפרץ גם כשזה לא התור שלך (למשל 3 שביעיות על הערימה ולך יש את השביעייה הרביעית). מניחים, הערימה נשרפת, וממשיכים לשחק מכם.</p>
  <p><b>סיום:</b> כשהיד והקופה נגמרות משחקים בפתוחים, ואחריהם בסגורים – הופכים אחד; לא מתאים? לוקחים את הערימה יחד איתו.</p>
  <p><b>שעון:</b> 20 שניות למהלך – מי שלא הספיק לוקח את הערימה. <b>ניקוד:</b> ראשון +2, שני +1, השיטהד −1.</p>
  <button class="btn primary" data-a="close">הבנתי</button></div></div>`;
@@ -2176,7 +2289,7 @@ function renderMenu(){
  if(S.bots>maxOpp())S.bots=maxOpp();
  if(S.seats>maxSeats())S.seats=maxSeats();
  setHTML(`<div class="screen">
- <div class="title"><h1>${GAME_NAMES[S.game]}</h1><div class="sub">שולחן האבירים</div><div class="orn">✦</div></div>
+ ${musBtn('musfix')}<div class="title"><h1>${GAME_NAMES[S.game]}</h1><div class="sub">שולחן האבירים</div><div class="orn">✦</div></div>
  ${canInstallHere()?`<button class="btn installb" data-a="install"><img src="icon-192.png" alt=""><span><b>התקן כאפליקציה בטלפון</b><small>סמל במסך הבית · מסך מלא</small></span><span class="iarr">⤓</span></button>`:''}
  <div class="seg gsel">${Object.keys(GAME_NAMES).map(k=>`<button class="${S.game===k?'on':''}" data-a="game" data-v="${k}">${GAME_NAMES[k]}</button>`).join('')}</div>
  <p class="gdesc">${S.game==='durak'?'להיפטר מכל הקלפים – מי שנשאר אחרון הוא הדוראק. עם תחבולות, כוחות וחשיפה.':S.game==='cabo'?'4 קלפים סגורים, זיכרון ותעוזה – הסכום הנמוך מנצח. משחק עד 100 נקודות.':'3 סגורים, 3 פתוחים, 3 ביד – אל תהיה האחרון. 2 מאפס, 3 שקוף, 7 חוסם, 8 מדלג, 10 שורף.'}</p>
@@ -2388,6 +2501,7 @@ app.addEventListener('click',e=>{
   case 'shready':act({t:'ready'});V.sel=null;render();break;
   case 'shplay':{const ids=(V.multi||[]).slice();V.multi=[];if(ids.length)act({t:'play',ids});render();break;}
   case 'shpick':V.multi=[];act({t:'pickup'});break;
+  case 'shcut':V.multi=[];act({t:'cut'});break;
   case 'cslot':CB.tapMine(+v);break;
   case 'oslot':CB.tapOpp(+t.dataset.p,+v);break;
   case 'cdraw':act({t:'draw'});break;
@@ -2403,6 +2517,7 @@ app.addEventListener('click',e=>{
   case 'joincode':{const el=document.getElementById('jcode');joinTable(el?el.value:'');break;}
   case 'rules':UI.rules=true;render();break;
   case 'install':doInstall();break;
+  case 'music':musToggle();break;
   case 'chat':chatToggle(true);break;
   case 'login':{const el=document.getElementById('email');emailLogin(el?el.value:UI.emailDraft);break;}
   case 'logout':emailLogout();break;
